@@ -25,6 +25,8 @@ pub struct Item {
     pub title: String,
     pub preview: String,
     pub time: i64,
+    #[serde(default)]
+    pub order: u64,
     pub pinned: bool,
     pub formats: Vec<Format>,
     pub thumbnail: Option<String>,
@@ -42,6 +44,14 @@ pub struct Settings {
     pub exclude_apps: String,
     pub max_mb: usize,
     pub startup: bool,
+    pub age_enabled: bool,
+    pub count_enabled: bool,
+    pub skip_consecutive: bool,
+    pub hide_after_copy: bool,
+    pub compact: bool,
+    pub always_on_top: bool,
+    pub window_size: [f32; 2],
+    pub window_position: Option<[f32; 2]>,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -55,6 +65,14 @@ impl Default for Settings {
             exclude_apps: "keepass\n1password\nbitwarden".into(),
             max_mb: 32,
             startup: false,
+            age_enabled: true,
+            count_enabled: true,
+            skip_consecutive: true,
+            hide_after_copy: false,
+            compact: true,
+            always_on_top: false,
+            window_size: [820., 620.],
+            window_position: None,
         }
     }
 }
@@ -104,7 +122,7 @@ impl Database {
                 exec,
                 close,
             };
-            out.run("PRAGMA journal_mode=WAL; PRAGMA secure_delete=ON; CREATE TABLE IF NOT EXISTS history (id TEXT PRIMARY KEY, json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY, json TEXT NOT NULL);")?;
+            out.run("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA secure_delete=ON; CREATE TABLE IF NOT EXISTS history (id TEXT PRIMARY KEY, json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY, json TEXT NOT NULL);")?;
             Ok(out)
         }
     }
@@ -123,6 +141,14 @@ impl Database {
                 Err("SQLite could not save clipboard history".into())
             }
         }
+    }
+    pub fn transaction(&self, sql: &str) -> Result<(), String> {
+        self.run("BEGIN IMMEDIATE")?;
+        if let Err(e) = self.run(sql).and_then(|_| self.run("COMMIT")) {
+            let _ = self.run("ROLLBACK");
+            return Err(e);
+        }
+        Ok(())
     }
     pub fn rows(&self, sql: &str) -> Result<Vec<String>, String> {
         unsafe extern "C" fn cb(
@@ -179,13 +205,25 @@ impl Store {
         let items = db
             .rows("SELECT json FROM history")?
             .into_iter()
-            .filter_map(|v| serde_json::from_str(&v).ok())
-            .collect();
-        let settings = db
-            .rows("SELECT json FROM settings WHERE id=1")?
-            .first()
-            .and_then(|v| serde_json::from_str(v).ok())
-            .unwrap_or_default();
+            .map(|v| {
+                serde_json::from_str(&v)
+                    .map_err(|e| format!("History could not be read; no data was removed: {e}"))
+            })
+            .collect::<Result<Vec<Item>, String>>()?;
+        let mut settings = match db.rows("SELECT json FROM settings WHERE id=1")?.first() {
+            Some(v) => serde_json::from_str(v).map_err(|e| {
+                format!("Saved settings are unreadable; history has not been modified: {e}")
+            })?,
+            None => Settings::default(),
+        };
+        // Legacy zero-day retention meant disabled; keep that behavior with
+        // the new independent switch and a usable value when enabled later.
+        if settings.days <= 0 {
+            settings.age_enabled = false;
+            settings.days = 30;
+        }
+        // Additive JSON fields retain the existing tables and payload paths.
+        db.transaction("PRAGMA user_version=1;")?;
         let mut s = Self {
             root,
             db,
@@ -199,9 +237,9 @@ impl Store {
     }
     pub fn sort(&mut self) {
         self.items.sort_by(|a, b| {
-            b.pinned
-                .cmp(&a.pinned)
-                .then(b.time.cmp(&a.time))
+            b.time
+                .cmp(&a.time)
+                .then(b.order.cmp(&a.order))
                 .then(b.id.cmp(&a.id))
         });
     }
@@ -213,14 +251,22 @@ impl Store {
         ))
     }
     pub fn save_settings(&mut self) -> Result<(), String> {
-        self.settings.limit = self.settings.limit.clamp(10, 10000);
+        self.settings.limit = self.settings.limit.clamp(1, 10000);
         self.settings.days = self.settings.days.clamp(0, 3650);
         self.settings.max_mb = self.settings.max_mb.clamp(1, 128);
-        self.db.run(&format!(
-            "INSERT OR REPLACE INTO settings VALUES (1,{});",
-            quote(&serde_json::to_string(&self.settings).unwrap())
+        let ids = self.cleanup_ids(&self.settings);
+        let deletes: String = ids
+            .iter()
+            .map(|id| format!("DELETE FROM history WHERE id={};", quote(id)))
+            .collect();
+        self.db.transaction(&format!(
+            "INSERT OR REPLACE INTO settings VALUES (1,{});{}",
+            quote(&serde_json::to_string(&self.settings).unwrap()),
+            deletes
         ))?;
-        self.cleanup()
+        self.items.retain(|i| !ids.contains(&i.id));
+        self.collect_orphans();
+        Ok(())
     }
     pub fn ingest(&mut self, data: &Snapshot, source: &str) -> Result<bool, String> {
         if data.is_empty() || self.settings.paused {
@@ -228,7 +274,7 @@ impl Store {
         }
         let bytes: usize = data.values().map(Vec::len).sum();
         if bytes > self.settings.max_mb * 1024 * 1024 {
-            return Ok(false);
+            return Err("Clipboard item exceeds the configured maximum clip size".into());
         }
         let preview = text_of(data);
         if self.settings.exclude_content.lines().any(|x| {
@@ -264,11 +310,10 @@ impl Store {
             .iter()
             .position(|i| i.hash == hash && self.snapshot(i).as_ref() == Ok(data))
         {
-            let mut it = self.items[i].clone();
-            it.time = now();
-            self.save_item(&it)?;
-            self.items[i] = it;
-            self.sort();
+            let id = self.items[i].id.clone();
+            if !self.settings.skip_consecutive || i != 0 {
+                self.touch(&id)?;
+            }
             return Ok(false);
         }
         let id = format!(
@@ -341,11 +386,30 @@ impl Store {
             title,
             preview: preview.chars().take(200000).collect(),
             time: now(),
+            order: self
+                .items
+                .iter()
+                .map(|i| i.order)
+                .max()
+                .unwrap_or(0)
+                .saturating_add(1),
             pinned: false,
             formats,
             thumbnail,
             source: source.into(),
         };
+        // Flush payloads before committing metadata, including on sudden power loss.
+        for f in &item.formats {
+            fs::File::open(self.root.join(&f.file))
+                .and_then(|f| f.sync_all())
+                .map_err(|e| e.to_string())?;
+        }
+        fs::File::open(&dir)
+            .and_then(|f| f.sync_all())
+            .map_err(|e| e.to_string())?;
+        fs::File::open(self.root.join("items"))
+            .and_then(|f| f.sync_all())
+            .map_err(|e| e.to_string())?;
         self.save_item(&item)?;
         self.items.push(item);
         self.sort();
@@ -355,10 +419,14 @@ impl Store {
     pub fn snapshot(&self, item: &Item) -> Result<Snapshot, String> {
         let mut d = Snapshot::new();
         for f in &item.formats {
-            d.insert(
-                f.mime.clone(),
-                fs::read(self.root.join(&f.file)).map_err(|e| e.to_string())?,
-            );
+            d.insert(f.mime.clone(), {
+                let path = fs::canonicalize(self.root.join(&f.file)).map_err(|e| e.to_string())?;
+                let items = fs::canonicalize(self.root.join("items")).map_err(|e| e.to_string())?;
+                if !path.starts_with(items) {
+                    return Err("Saved payload path is outside the history directory".into());
+                }
+                fs::read(path).map_err(|e| e.to_string())?
+            });
         }
         Ok(d)
     }
@@ -372,11 +440,62 @@ impl Store {
         }
         Ok(())
     }
+    pub fn touch(&mut self, id: &str) -> Result<(), String> {
+        if let Some(i) = self.items.iter().position(|x| x.id == id) {
+            let mut item = self.items[i].clone();
+            item.time = now();
+            item.order = self
+                .items
+                .iter()
+                .map(|i| i.order)
+                .max()
+                .unwrap_or(0)
+                .saturating_add(1);
+            self.save_item(&item)?;
+            self.items[i] = item;
+            self.sort();
+        }
+        self.cleanup()
+    }
+    pub fn full_text(&self, item: &Item) -> Result<String, String> {
+        Ok(text_of(&self.snapshot(item)?))
+    }
+    pub fn edit_new(&mut self, original: &Item, text: &str) -> Result<Option<Item>, String> {
+        if text == self.full_text(original)? {
+            return Ok(None);
+        }
+        if text.is_empty() {
+            return Err("Enter some text before saving".into());
+        }
+        let data = Snapshot::from([("text/plain;charset=utf-8".into(), text.as_bytes().to_vec())]);
+        if self
+            .items
+            .iter()
+            .any(|i| self.snapshot(i).as_ref() == Ok(&data))
+        {
+            return Err("This edited text already exists; no new clip was created".into());
+        }
+        // Explicit edits are allowed while monitoring is paused, but still respect exclusions/limits.
+        let paused = self.settings.paused;
+        self.settings.paused = false;
+        let result = self.ingest(&data, "ClipVault editor");
+        self.settings.paused = paused;
+        match result? {
+            true => Ok(self.items.iter().find(|i| self.snapshot(i).as_ref() == Ok(&data)).cloned()),
+            false => Err("This text already exists or is excluded by Privacy settings; no new clip was created".into()),
+        }
+    }
     pub fn delete(&mut self, id: &str) -> Result<(), String> {
-        self.db
-            .run(&format!("DELETE FROM history WHERE id={}", quote(id)))?;
-        self.items.retain(|i| i.id != id);
-        let _ = fs::remove_dir_all(self.root.join("items").join(id));
+        self.remove_ids(&[id.to_owned()])
+    }
+    fn remove_ids(&mut self, ids: &[String]) -> Result<(), String> {
+        let sql: String = ids
+            .iter()
+            .map(|id| format!("DELETE FROM history WHERE id={};", quote(id)))
+            .collect();
+        self.db.transaction(&sql)?;
+        self.items.retain(|i| !ids.contains(&i.id));
+        self.collect_orphans();
         Ok(())
     }
     pub fn clear(&mut self, include_pinned: bool) -> Result<(), String> {
@@ -386,42 +505,56 @@ impl Store {
             .filter(|i| include_pinned || !i.pinned)
             .map(|i| i.id.clone())
             .collect();
-        for id in ids {
-            self.delete(&id)?;
-        }
-        Ok(())
+        self.remove_ids(&ids)
+    }
+    pub fn cleanup_ids(&self, settings: &Settings) -> Vec<String> {
+        let mut items: Vec<_> = self.items.iter().filter(|i| !i.pinned).collect();
+        items.sort_by(|a, b| {
+            b.time
+                .cmp(&a.time)
+                .then(b.order.cmp(&a.order))
+                .then(b.id.cmp(&a.id))
+        });
+        items
+            .into_iter()
+            .enumerate()
+            .filter(|(n, i)| {
+                (settings.count_enabled && *n >= settings.limit)
+                    || (settings.age_enabled
+                        && settings.days > 0
+                        && i.time < now() - settings.days * 86400)
+            })
+            .map(|(_, i)| i.id.clone())
+            .collect()
     }
     pub fn cleanup(&mut self) -> Result<(), String> {
         self.sort();
-        let mut unpinned = 0;
-        let ids: Vec<_> = self
-            .items
-            .iter()
-            .filter(|i| {
-                if i.pinned {
-                    false
-                } else {
-                    unpinned += 1;
-                    unpinned > self.settings.limit
-                        || (self.settings.days > 0 && i.time < now() - self.settings.days * 86400)
-                }
-            })
-            .map(|i| i.id.clone())
-            .collect();
-        for id in ids {
-            self.delete(&id)?;
-        }
-        Ok(())
+        self.remove_ids(&self.cleanup_ids(&self.settings))
     }
     fn collect_orphans(&self) {
-        if let Ok(dirs) = fs::read_dir(self.root.join("items")) {
-            for d in dirs.flatten() {
-                if !self
-                    .items
+        // A migrated clip may share another clip's payload. Keep every referenced
+        // file and never follow symlinks or untrusted paths outside items/.
+        let mut referenced: std::collections::HashSet<PathBuf> = self
+            .items
+            .iter()
+            .flat_map(|i| {
+                i.formats
                     .iter()
-                    .any(|i| d.file_name().to_str() == Some(&i.id))
-                {
-                    let _ = fs::remove_dir_all(d.path());
+                    .map(|f| PathBuf::from(&f.file))
+                    .chain(i.thumbnail.iter().map(PathBuf::from))
+            })
+            .collect();
+        for item in &self.items {
+            referenced.insert(PathBuf::from("items").join(&item.id));
+        }
+        if let Ok(dirs) = fs::read_dir(self.root.join("items")) {
+            for dir in dirs.flatten() {
+                if !dir.file_type().is_ok_and(|t| t.is_dir()) {
+                    continue;
+                }
+                let relative = PathBuf::from("items").join(dir.file_name());
+                if !referenced.iter().any(|p| p.starts_with(&relative)) {
+                    let _ = fs::remove_dir_all(dir.path());
                 }
             }
         }
@@ -572,6 +705,42 @@ mod tests {
         Store::open(p).unwrap()
     }
     #[test]
+    fn hide_after_copy_defaults_off_and_preserves_explicit_saved_preferences() {
+        assert!(!Settings::default().hide_after_copy);
+        assert!(
+            !serde_json::from_str::<Settings>(r#"{"shortcut":"Ctrl+Alt+V"}"#)
+                .unwrap()
+                .hide_after_copy
+        );
+        for hide in [false, true] {
+            let mut s = store();
+            assert!(!s.settings.hide_after_copy);
+            s.ingest(
+                &Snapshot::from([("text/plain".into(), b"keep history".to_vec())]),
+                "test",
+            )
+            .unwrap();
+            let id = s.items[0].id.clone();
+            s.pin(&id).unwrap();
+            s.settings.hide_after_copy = hide;
+            s.settings.shortcut = "Ctrl+Alt+V".into();
+            s.save_settings().unwrap();
+            let root = s.root.clone();
+            drop(s);
+            let s = Store::open(root).unwrap();
+            assert_eq!(s.settings.hide_after_copy, hide);
+            assert_eq!(s.settings.shortcut, "Ctrl+Alt+V");
+            assert_eq!(s.items.len(), 1);
+            assert_eq!(s.items[0].id, id);
+            assert!(s.items[0].pinned);
+            assert_eq!(
+                s.snapshot(&s.items[0]).unwrap()["text/plain"],
+                b"keep history"
+            );
+            fs::remove_dir_all(&s.root).unwrap();
+        }
+    }
+    #[test]
     fn multi_format_roundtrip_and_dedup() {
         let mut s = store();
         let d = Snapshot::from([
@@ -703,9 +872,208 @@ mod tests {
         let mut s = store();
         s.settings.max_mb = 1;
         let data = Snapshot::from([("text/plain".into(), vec![b'x'; 1024 * 1024 + 1])]);
-        assert!(!s.ingest(&data, "test").unwrap());
+        assert!(s.ingest(&data, "test").is_err());
         assert!(s.items.is_empty());
         assert_eq!(fs::read_dir(s.root.join("items")).unwrap().count(), 0);
+        fs::remove_dir_all(&s.root).unwrap();
+    }
+    #[test]
+    fn legacy_migration_keeps_text_images_pins_and_settings() {
+        let mut s = store();
+        let text = Snapshot::from([("text/plain".into(), b"legacy saved text".to_vec())]);
+        s.ingest(&text, "test").unwrap();
+        let mut item = s.items[0].clone();
+        item.pinned = true;
+        let mut legacy = serde_json::to_value(&item).unwrap();
+        legacy.as_object_mut().unwrap().remove("order");
+        s.db.run(&format!(
+            "UPDATE history SET json={}",
+            quote(&legacy.to_string())
+        ))
+        .unwrap();
+        s.db.run("INSERT OR REPLACE INTO settings VALUES(1,'{\"limit\":42,\"days\":0,\"light\":true,\"paused\":true}')").unwrap();
+        let root = s.root.clone();
+        drop(s);
+        let s = Store::open(root).unwrap();
+        assert_eq!(s.items.len(), 1);
+        assert!(s.items[0].pinned);
+        assert_eq!(s.snapshot(&s.items[0]).unwrap(), text);
+        assert!(s.settings.light);
+        assert!(s.settings.paused);
+        assert_eq!(s.settings.limit, 42);
+        assert!(!s.settings.age_enabled);
+        assert_eq!(s.settings.days, 30);
+        assert_eq!(s.db.rows("PRAGMA user_version").unwrap(), vec!["1"]);
+        fs::remove_dir_all(&s.root).unwrap();
+    }
+    #[test]
+    fn reuse_moves_to_top_without_duplicate_and_keeps_pin() {
+        let mut s = store();
+        for text in ["one", "two", "three"] {
+            s.ingest(
+                &Snapshot::from([("text/plain".into(), text.as_bytes().to_vec())]),
+                "test",
+            )
+            .unwrap();
+        }
+        let id = s.items[2].id.clone();
+        s.pin(&id).unwrap();
+        s.touch(&id).unwrap();
+        assert_eq!(s.items[0].id, id);
+        assert!(s.items[0].pinned);
+        assert_eq!(s.items.len(), 3);
+        let root = s.root.clone();
+        drop(s);
+        let s = Store::open(root).unwrap();
+        assert_eq!(s.items[0].id, id);
+        assert!(s.items[0].pinned);
+        fs::remove_dir_all(&s.root).unwrap();
+    }
+    #[test]
+    fn edit_is_separate_unpinned_and_unchanged_is_noop() {
+        let mut s = store();
+        s.ingest(
+            &Snapshot::from([("text/plain".into(), b"original\nsecond line".to_vec())]),
+            "test",
+        )
+        .unwrap();
+        let id = s.items[0].id.clone();
+        s.pin(&id).unwrap();
+        let original = s.items[0].clone();
+        assert!(s
+            .edit_new(&original, "original\nsecond line")
+            .unwrap()
+            .is_none());
+        let edit = s
+            .edit_new(&original, "edited\nsecond line")
+            .unwrap()
+            .unwrap();
+        assert_ne!(edit.id, id);
+        assert!(!edit.pinned);
+        assert_eq!(s.items[0].id, edit.id);
+        assert_eq!(
+            serde_json::to_string(s.items.iter().find(|i| i.id == id).unwrap()).unwrap(),
+            serde_json::to_string(&original).unwrap()
+        );
+        assert_eq!(s.items.len(), 2);
+        fs::remove_dir_all(&s.root).unwrap();
+    }
+    #[test]
+    fn independent_cleanup_rules_and_pins() {
+        for (age, count, expected) in [
+            (false, false, 6),
+            (true, false, 4),
+            (false, true, 3),
+            (true, true, 3),
+        ] {
+            let mut s = store();
+            s.settings.age_enabled = false;
+            s.settings.count_enabled = false;
+            for n in 0..6 {
+                s.ingest(
+                    &Snapshot::from([("text/plain".into(), format!("clip {n}").into_bytes())]),
+                    "test",
+                )
+                .unwrap();
+            }
+            let id = s.items[5].id.clone();
+            s.pin(&id).unwrap();
+            for n in [0, 4] {
+                s.items[n].time = now() - 40 * 86400;
+            }
+            s.settings.limit = 2;
+            s.settings.days = 30;
+            s.settings.age_enabled = age;
+            s.settings.count_enabled = count;
+            s.cleanup().unwrap();
+            assert_eq!(s.items.len(), expected, "age={age}, count={count}");
+            assert!(s.items.iter().any(|i| i.id == id && i.pinned));
+            s.clear(false).unwrap();
+            assert_eq!(s.items.len(), 1);
+            fs::remove_dir_all(&s.root).unwrap();
+        }
+    }
+    #[test]
+    fn referenced_image_payload_is_not_removed_with_another_clip() {
+        let mut s = store();
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(8, 8)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        let data = Snapshot::from([("image/png".into(), png.into_inner())]);
+        s.ingest(&data, "test").unwrap();
+        let original = s.items[0].clone();
+        let mut shared = original.clone();
+        shared.id = "shared-image".into();
+        s.save_item(&shared).unwrap();
+        s.items.push(shared);
+        s.delete(&original.id).unwrap();
+        assert_eq!(s.snapshot(&s.items[0]).unwrap(), data);
+        let root = s.root.clone();
+        drop(s);
+        let mut s = Store::open(root).unwrap();
+        assert_eq!(s.snapshot(&s.items[0]).unwrap(), data);
+        s.clear(false).unwrap();
+        assert!(!s.root.join("items").join(original.id).exists());
+        fs::remove_dir_all(&s.root).unwrap();
+    }
+    #[test]
+    fn corrupt_history_fails_closed_without_erasing_payloads() {
+        let s = store();
+        let root = s.root.clone();
+        fs::create_dir_all(root.join("items/precious")).unwrap();
+        fs::write(root.join("items/precious/0.bin"), b"preserve").unwrap();
+        s.db.run("INSERT INTO history VALUES('broken','not json')")
+            .unwrap();
+        drop(s);
+        assert!(Store::open(root.clone()).is_err());
+        assert!(root.join("items/precious/0.bin").is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn all_new_settings_persist_and_cleanup_preview_does_not_mutate() {
+        let mut s = store();
+        s.settings.age_enabled = false;
+        s.settings.count_enabled = false;
+        s.settings.hide_after_copy = false;
+        s.settings.skip_consecutive = false;
+        s.settings.compact = false;
+        s.settings.always_on_top = true;
+        s.settings.window_size = [900., 700.];
+        s.settings.window_position = Some([40., 60.]);
+        s.save_settings().unwrap();
+        for n in 0..3 {
+            s.ingest(
+                &Snapshot::from([("text/plain".into(), format!("clip {n}").into_bytes())]),
+                "test",
+            )
+            .unwrap();
+        }
+        let mut candidate = s.settings.clone();
+        candidate.count_enabled = true;
+        candidate.limit = 1;
+        assert_eq!(s.cleanup_ids(&candidate).len(), 2);
+        assert_eq!(s.items.len(), 3);
+        let root = s.root.clone();
+        drop(s);
+        let s = Store::open(root).unwrap();
+        assert!(!s.settings.hide_after_copy);
+        assert!(!s.settings.skip_consecutive);
+        assert!(!s.settings.compact);
+        assert!(s.settings.always_on_top);
+        assert_eq!(s.settings.window_size, [900., 700.]);
+        assert_eq!(s.settings.window_position, Some([40., 60.]));
+        assert_eq!(s.items.len(), 3);
+        fs::remove_dir_all(&s.root).unwrap();
+    }
+    #[test]
+    fn transaction_rolls_back_on_failure() {
+        let s = store();
+        assert!(s
+            .db
+            .transaction("INSERT INTO settings VALUES(1,'{}'); INSERT INTO nonexistent VALUES(1);")
+            .is_err());
+        assert!(s.db.rows("SELECT json FROM settings").unwrap().is_empty());
         fs::remove_dir_all(&s.root).unwrap();
     }
 }

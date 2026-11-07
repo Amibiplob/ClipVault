@@ -15,6 +15,8 @@ fi
 if [[ $mode == all || $mode == appimage ]]; then
     linuxdeploy=${LINUXDEPLOY:-$(command -v linuxdeploy-x86_64.AppImage || command -v linuxdeploy || true)}
     [[ -x $linuxdeploy ]] || { echo 'linuxdeploy is missing; run scripts/install-packaging-tools.sh with internet access.' >&2; exit 1; }
+    appimage_plugin=${LINUXDEPLOY_PLUGIN_APPIMAGE:-$(command -v linuxdeploy-plugin-appimage-x86_64.AppImage || command -v linuxdeploy-plugin-appimage || true)}
+    [[ -x $appimage_plugin ]] || { echo 'linuxdeploy AppImage plugin is missing; run scripts/install-packaging-tools.sh.' >&2; exit 1; }
 fi
 cargo build --release --locked --offline
 python3 scripts/packaging-support.py notices --check
@@ -52,9 +54,18 @@ PY
     LD_LIBRARY_PATH="$appdir/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" python3 scripts/packaging-support.py verify-closure
     # Collect notices after linuxdeploy has added the transitive library closure.
     python3 scripts/packaging-support.py system-notices
+    if [[ -n ${LDAI_RUNTIME_FILE:-} ]]; then
+        test -s "$LDAI_RUNTIME_FILE"
+        runtime_manifest="${LDAI_RUNTIME_FILE%.*}.json"
+        # Cached runtime helper has no extension in its output filename.
+        if [[ -f ${LDAI_RUNTIME_FILE}.json ]]; then runtime_manifest="${LDAI_RUNTIME_FILE}.json"; fi
+        [[ ! -f $runtime_manifest ]] || cp -- "$runtime_manifest" "$appdir/usr/share/doc/clipvault/APPIMAGE-RUNTIME.json"
+    fi
     export LDAI_OUTPUT="$PWD/dist/ClipVault-${version}-x86_64.AppImage"
     export LDAI_VERSION="$version"
-    "$linuxdeploy" --appdir "$appdir" --custom-apprun packaging/linux/AppRun --output appimage
+    # Deployment and notice collection already completed above. Pack directly
+    # with the same linuxdeploy output plugin, without redeploying the closure.
+    "$appimage_plugin" --appdir "$appdir"
     test -s "$LDAI_OUTPUT"
     chmod 755 "$LDAI_OUTPUT"
     printf 'Created %s\n' "$LDAI_OUTPUT"

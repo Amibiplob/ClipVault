@@ -135,11 +135,15 @@ def stage():
     copy(ROOT / "packaging/linux" / desktop, "usr/share/applications/" + desktop)
     (APPDIR / desktop).symlink_to("usr/share/applications/" + desktop)
     copy(ROOT / "assets/clipvault.svg", "usr/share/icons/hicolor/scalable/apps/clipvault.svg")
+    for size in (16,24,32,48,64,128,256,512):
+        copy(ROOT / f"assets/icons/{size}x{size}/clipvault.png", f"usr/share/icons/hicolor/{size}x{size}/apps/clipvault.png")
     (APPDIR / "clipvault.svg").symlink_to("usr/share/icons/hicolor/scalable/apps/clipvault.svg")
     (APPDIR / ".DirIcon").symlink_to("clipvault.svg")
-    for name in ["LICENSE", "THIRD-PARTY-NOTICES.txt", "README.md"]:
+    for name in ["LICENSE", "THIRD-PARTY-NOTICES.txt", "README.md", "RELEASE-NOTES.md", "VERIFICATION.md", "ACTIVATION-VERIFICATION.md"]:
         copy(ROOT / name, "usr/share/doc/clipvault/" + name)
     copy(ROOT / "packaging/README.md", "usr/share/doc/clipvault/PACKAGING.md")
+    copy(ROOT / "docs/history.png", "usr/share/doc/clipvault/docs/history.png")
+    copy(ROOT / "assets/clipvault.svg", "usr/share/doc/clipvault/assets/clipvault.svg")
     paths = library_paths()
     for line in (ROOT / "packaging/linux/runtime-libraries.txt").read_text().splitlines():
         if line and not line.startswith("#"):
@@ -196,6 +200,14 @@ def system_notices():
         if relative == "usr/bin/clipvault":
             continue
         source = sources.get(relative) or paths.get(f.name)
+        if not source:
+            # linuxdeploy copies resolved filenames as well as SONAME aliases.
+            # ldconfig indexes the SONAME, so resolve known host paths before
+            # looking up Debian ownership; reject ambiguous mappings.
+            matches = {str(pathlib.Path(p).resolve()) for p in [*sources.values(), *paths.values()]
+                       if pathlib.Path(p).resolve().name == f.name}
+            if len(matches) == 1:
+                source = matches.pop()
         if not source:
             raise RuntimeError(f"Unknown source for bundled ELF: {relative}")
         source = pathlib.Path(source).resolve()

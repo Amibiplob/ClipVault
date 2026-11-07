@@ -27,6 +27,12 @@ check_tree() {
         test -s "$tree/$file"
     done
     desktop-file-validate "$tree/usr/share/applications/io.clipvault.desktop.desktop"
+    cmp "$root/assets/clipvault.svg" "$tree/usr/share/icons/hicolor/scalable/apps/clipvault.svg"
+    rg -q '^Icon=clipvault$' "$tree/usr/share/applications/io.clipvault.desktop.desktop"
+    rg -q '^StartupWMClass=clipvault$' "$tree/usr/share/applications/io.clipvault.desktop.desktop"
+    for size in 16 24 32 48 64 128 256 512; do
+        cmp "$root/assets/icons/${size}x${size}/clipvault.png" "$tree/usr/share/icons/hicolor/${size}x${size}/apps/clipvault.png"
+    done
     readelf -h "$tree/usr/bin/clipvault" | rg -q 'Machine:.*X86-64'
     if ldd "$tree/usr/bin/clipvault" | rg 'not found'; then return 1; fi
     "$launcher" --help | rg -q 'ClipVault'
@@ -39,7 +45,7 @@ import pathlib, struct, sys
 b = pathlib.Path(sys.argv[1]).read_bytes()
 assert b[:8] == b'\x89PNG\r\n\x1a\n'
 width, height = struct.unpack('>II', b[16:24])
-assert width >= 580 and height >= 560
+assert width >= 440 and height >= 420
 print(f'PASS: native package screenshot {width}x{height}')
 PY
     fi

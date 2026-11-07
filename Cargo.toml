@@ -1,6 +1,6 @@
 [package]
 name = "clipvault"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 description = "Private native Linux clipboard history"
 license = "MIT"
@@ -14,13 +14,27 @@ priority = "optional"
 # dlopen() libraries are invisible to cargo-deb's ELF dependency scan.
 depends = "$auto, libc6 (>= 2.39), libsqlite3-0, libgdk-pixbuf-2.0-0, libx11-6, libx11-xcb1, libxcursor1, libxi6, libxrandr2, libxinerama1, libxrender1, libxfixes3, libxext6, libxkbcommon0, libxkbcommon-x11-0, libxcb1, libxcb-render0, libxcb-shape0, libxcb-xfixes0, libwayland-client0, libwayland-cursor0, libwayland-egl1, libgl1, libegl1, xkb-data"
 recommends = "webp-pixbuf-loader"
+maintainer-scripts = "packaging/linux"
 assets = [
     ["target/release/clipvault", "usr/bin/clipvault", "755"],
     ["packaging/linux/io.clipvault.desktop.desktop", "usr/share/applications/io.clipvault.desktop.desktop", "644"],
     ["assets/clipvault.svg", "usr/share/icons/hicolor/scalable/apps/clipvault.svg", "644"],
+    ["assets/icons/16x16/clipvault.png", "usr/share/icons/hicolor/16x16/apps/clipvault.png", "644"],
+    ["assets/icons/24x24/clipvault.png", "usr/share/icons/hicolor/24x24/apps/clipvault.png", "644"],
+    ["assets/icons/32x32/clipvault.png", "usr/share/icons/hicolor/32x32/apps/clipvault.png", "644"],
+    ["assets/icons/48x48/clipvault.png", "usr/share/icons/hicolor/48x48/apps/clipvault.png", "644"],
+    ["assets/icons/64x64/clipvault.png", "usr/share/icons/hicolor/64x64/apps/clipvault.png", "644"],
+    ["assets/icons/128x128/clipvault.png", "usr/share/icons/hicolor/128x128/apps/clipvault.png", "644"],
+    ["assets/icons/256x256/clipvault.png", "usr/share/icons/hicolor/256x256/apps/clipvault.png", "644"],
+    ["assets/icons/512x512/clipvault.png", "usr/share/icons/hicolor/512x512/apps/clipvault.png", "644"],
     ["LICENSE", "usr/share/doc/clipvault/LICENSE", "644"],
     ["THIRD-PARTY-NOTICES.txt", "usr/share/doc/clipvault/THIRD-PARTY-NOTICES.txt", "644"],
     ["README.md", "usr/share/doc/clipvault/README.md", "644"],
+    ["RELEASE-NOTES.md", "usr/share/doc/clipvault/RELEASE-NOTES.md", "644"],
+    ["VERIFICATION.md", "usr/share/doc/clipvault/VERIFICATION.md", "644"],
+    ["ACTIVATION-VERIFICATION.md", "usr/share/doc/clipvault/ACTIVATION-VERIFICATION.md", "644"],
+    ["docs/history.png", "usr/share/doc/clipvault/docs/history.png", "644"],
+    ["assets/clipvault.svg", "usr/share/doc/clipvault/assets/clipvault.svg", "644"],
     ["packaging/README.md", "usr/share/doc/clipvault/PACKAGING.md", "644"],
 ]
 

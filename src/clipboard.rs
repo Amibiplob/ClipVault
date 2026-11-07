@@ -19,7 +19,7 @@ use x11rb::{
 };
 
 pub enum Command {
-    Restore(Snapshot),
+    Restore(String, Snapshot),
     Shortcut(String),
     Stop,
 }
@@ -27,7 +27,8 @@ pub enum Command {
 pub enum Notice {
     Changed,
     Open,
-    Activated,
+    Activated(String),
+    ActivationFailed(String, String),
     ShortcutApplied(String),
     Status(String),
     Error(String),
@@ -52,6 +53,22 @@ pub fn start(store: Shared) -> Service {
         }
     });
     Service { tx, rx: events }
+}
+pub fn compatible_text(mut data: Snapshot) -> Snapshot {
+    if let Some(bytes) = data
+        .get("text/plain;charset=utf-8")
+        .or_else(|| data.get("text/plain;charset=UTF-8"))
+        .or_else(|| data.get("text/plain"))
+        .or_else(|| data.get("UTF8_STRING"))
+        .cloned()
+    {
+        if std::str::from_utf8(&bytes).is_ok() {
+            for mime in ["UTF8_STRING", "text/plain;charset=utf-8", "text/plain"] {
+                data.entry(mime.into()).or_insert_with(|| bytes.clone());
+            }
+        }
+    }
+    data
 }
 pub fn sensitive_mime(m: &str) -> bool {
     m.to_ascii_lowercase().contains("password")
@@ -479,16 +496,22 @@ impl X11 {
         }
         for (a, name) in targets {
             if supported(&name) {
-                if let Ok(b) = self.fetch(a, cap.saturating_sub(data.values().map(Vec::len).sum()))
-                {
-                    if !b.is_empty() {
+                match self.fetch(a, cap.saturating_sub(data.values().map(Vec::len).sum())) {
+                    Ok(b) if !b.is_empty() => {
                         data.insert(name, b);
                     }
+                    Err(e) if e.contains("size limit") => return Err(e),
+                    _ => {}
                 }
             }
             if data.len() >= 24 {
                 break;
             }
+        }
+        if data.is_empty() {
+            return Err(
+                "This clipboard content has no supported text, image, or file format".into(),
+            );
         }
         Ok(data)
     }
@@ -516,7 +539,10 @@ impl X11 {
         String::new()
     }
     fn restore(&mut self, data: Snapshot) -> Result<(), String> {
-        self.owned = data;
+        if data.is_empty() {
+            return Err("The saved clip has no readable clipboard formats".into());
+        }
+        self.owned = compatible_text(data);
         self.c
             .set_selection_owner(self.win, self.clipboard, x11rb::CURRENT_TIME)
             .map_err(err)?
@@ -551,13 +577,22 @@ pub fn run_x11(store: Shared, rx: Receiver<Command>, out: Sender<Notice>) -> Res
         while let Ok(cmd) = rx.try_recv() {
             match cmd {
                 Command::Stop => return Ok(()),
-                Command::Restore(data) => {
+                Command::Restore(id, data) => {
                     match x.restore(data) {
                         Ok(()) => {
-                            let _ = out.send(Notice::Activated);
+                            if let Err(e) = store.lock().unwrap().touch(&id) {
+                                let _ = out.send(Notice::ActivationFailed(
+                                    id,
+                                    format!(
+                                        "Clipboard is ready, but recency could not be saved: {e}"
+                                    ),
+                                ));
+                            } else {
+                                let _ = out.send(Notice::Activated(id));
+                            }
                         }
                         Err(e) => {
-                            let _ = out.send(Notice::Error(e));
+                            let _ = out.send(Notice::ActivationFailed(id, format!("Could not copy this clip: {e}. Try again; the window will stay open.")));
                         }
                     }
                     dirty = false;
@@ -604,16 +639,21 @@ pub fn run_x11(store: Shared, rx: Receiver<Command>, out: Sender<Notice>) -> Res
                         !v.trim().is_empty()
                             && source.to_lowercase().contains(&v.trim().to_lowercase())
                     }) {
-                        if let Ok(data) = x.capture(settings.max_mb * 1024 * 1024) {
-                            if x.c
-                                .get_selection_owner(x.clipboard)
-                                .map_err(err)?
-                                .reply()
-                                .map_err(err)?
-                                .owner
-                                == owner
-                            {
-                                record(&store, data, &source, &out);
+                        match x.capture(settings.max_mb * 1024 * 1024) {
+                            Ok(data) => {
+                                if x.c
+                                    .get_selection_owner(x.clipboard)
+                                    .map_err(err)?
+                                    .reply()
+                                    .map_err(err)?
+                                    .owner
+                                    == owner
+                                {
+                                    record(&store, data, &source, &out);
+                                }
+                            }
+                            Err(e) => {
+                                let _ = out.send(Notice::Error(e));
                             }
                         }
                     }
@@ -642,5 +682,86 @@ mod tests {
         for invalid in ["V", "Shift+V", "Super+", "Super+Enter", "Unknown+V", ""] {
             assert!(parse_shortcut(invalid).is_err(), "{invalid}");
         }
+    }
+}
+
+#[cfg(test)]
+mod desktop_tests {
+    use super::*;
+    #[test]
+    fn text_aliases_preserve_original_formats() {
+        let original = Snapshot::from([
+            ("text/plain".into(), "বাংলা text".as_bytes().to_vec()),
+            ("text/html".into(), b"<b>text</b>".to_vec()),
+        ]);
+        let restored = compatible_text(original.clone());
+        for (mime, bytes) in original {
+            assert_eq!(restored.get(&mime), Some(&bytes));
+        }
+        assert_eq!(restored["UTF8_STRING"], "বাংলা text".as_bytes());
+    }
+    #[test]
+    #[ignore = "Requires a real X11 desktop; changes its system clipboard"]
+    fn x11_text_and_image_activation_roundtrip() {
+        let root = std::env::temp_dir().join(format!("cv-x11-{}", std::process::id()));
+        let mut store = Store::open(root.clone()).unwrap();
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(23, 17)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        let snapshots = [
+            Snapshot::from([(
+                "text/plain".into(),
+                b"ClipVault clipboard round trip".to_vec(),
+            )]),
+            Snapshot::from([("image/png".into(), png.into_inner())]),
+        ];
+        for data in &snapshots {
+            store.ingest(data, "test").unwrap();
+        }
+        let store = Arc::new(Mutex::new(store));
+        let (tx, rx) = mpsc::channel();
+        let (out, events) = mpsc::channel();
+        let shared = store.clone();
+        let handle = std::thread::spawn(move || run_x11(shared, rx, out));
+        for data in snapshots {
+            let id = {
+                let s = store.lock().unwrap();
+                s.items
+                    .iter()
+                    .find(|i| s.snapshot(i).as_ref() == Ok(&data))
+                    .unwrap()
+                    .id
+                    .clone()
+            };
+            tx.send(Command::Restore(id, data.clone())).unwrap();
+            let end = Instant::now() + Duration::from_secs(5);
+            loop {
+                assert!(
+                    Instant::now() < end,
+                    "clipboard activation not acknowledged"
+                );
+                if let Ok(Notice::Activated(_)) = events.recv_timeout(Duration::from_millis(100)) {
+                    break;
+                }
+            }
+            let mut client = X11::new(mpsc::channel().0).unwrap();
+            let mime = if data.contains_key("image/png") {
+                "image/png"
+            } else {
+                "UTF8_STRING"
+            };
+            let atom = client.atom(mime).unwrap();
+            let bytes = client.fetch(atom, 1024 * 1024).unwrap();
+            assert_eq!(bytes, *data.values().next().unwrap());
+            assert_eq!(store.lock().unwrap().items.len(), 2);
+        }
+        tx.send(Command::Stop).unwrap();
+        handle.join().unwrap().unwrap();
+        drop(store);
+        let store = Store::open(root.clone()).unwrap();
+        assert_eq!(store.items.len(), 2);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -99,18 +99,33 @@ fn launch() -> Result<(), String> {
     let store = Arc::new(Mutex::new(storage::Store::open(root)?));
     let service = clipboard::start(store.clone());
     let hidden = args.iter().any(|a| a == "--background") && shot.is_none();
-    let viewport = egui::ViewportBuilder::default()
+    let settings = store.lock().unwrap().settings.clone();
+    let image = image::load_from_memory(include_bytes!("../assets/icons/256x256/clipvault.png"))
+        .map_err(|e| e.to_string())?
+        .into_rgba8();
+    let mut viewport = egui::ViewportBuilder::default()
         .with_title("ClipVault")
         .with_app_id("io.clipvault.desktop")
-        .with_inner_size([740., 780.])
-        .with_min_inner_size([580., 560.])
-        .with_decorations(false)
-        .with_transparent(false)
-        .with_visible(!hidden)
-        .with_always_on_top();
+        .with_icon(egui::IconData {
+            rgba: image.into_raw(),
+            width: 256,
+            height: 256,
+        })
+        .with_inner_size(settings.window_size)
+        .with_min_inner_size([440., 420.])
+        .with_clamp_size_to_monitor_size(true)
+        .with_decorations(true)
+        .with_resizable(true)
+        .with_visible(!hidden);
+    if settings.always_on_top {
+        viewport = viewport.with_always_on_top();
+    }
+    if let Some([x, y]) = settings.window_position {
+        viewport = viewport.with_position([x.max(0.), y.max(0.)]);
+    }
     let options = eframe::NativeOptions {
         viewport,
-        centered: true,
+        centered: settings.window_position.is_none(),
         renderer: eframe::Renderer::Glow,
         ..Default::default()
     };

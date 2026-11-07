@@ -93,9 +93,9 @@ pub fn draw(p: &Painter, r: Rect, name: &str, color: Color32) {
             ]);
         }
         "text" => {
-            line(&[(5., 5.), (19., 5.)]);
-            line(&[(12., 5.), (12., 20.)]);
-            line(&[(8., 20.), (16., 20.)]);
+            line(&[(5., 6.), (19., 6.)]);
+            line(&[(5., 12.), (17., 12.)]);
+            line(&[(5., 18.), (14., 18.)]);
         }
         "code" => {
             line(&[(8., 6.), (2., 12.), (8., 18.)]);
@@ -199,9 +199,14 @@ pub fn draw(p: &Painter, r: Rect, name: &str, color: Color32) {
 }
 pub fn button(ui: &mut Ui, name: &str, tip: &str, size: f32, color: Color32) -> Response {
     let (r, res) = ui.allocate_exact_size(vec2(size, size), Sense::click());
-    if res.hovered() {
+    res.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), tip));
+    if res.hovered() || res.has_focus() {
         ui.painter()
             .rect_filled(r, 6, Color32::from_white_alpha(13));
+    }
+    if res.has_focus() {
+        ui.painter()
+            .rect_stroke(r, 6, ui.visuals().selection.stroke, StrokeKind::Inside);
     }
     draw(ui.painter(), r.shrink((size - 18.) / 2.), name, color);
     res.on_hover_text(tip)

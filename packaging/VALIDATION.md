@@ -1,3 +1,12 @@
+# Current 1.0.0 validation
+
+See [VERIFICATION.md](../VERIFICATION.md) for the current release results,
+actual package paths and required manual checks. The section below preserves
+the earlier packaging investigation; its missing-tool status is historical,
+and does not describe the current tool cache or 1.0.0 artifacts.
+
+## Historical 0.1.0 investigation
+
 # Packaging validation — 2026-11-07
 
 **No finished .deb or .AppImage exists in this workspace.** Distribution is

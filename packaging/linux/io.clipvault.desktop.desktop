@@ -8,4 +8,4 @@ Icon=clipvault
 Terminal=false
 Categories=Utility;
 Keywords=clipboard;history;paste;
-StartupWMClass=ClipVault
+StartupWMClass=clipvault
