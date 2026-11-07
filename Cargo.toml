@@ -1,0 +1,24 @@
+[package]
+name = "clipvault"
+version = "0.1.0"
+edition = "2021"
+description = "Private native Linux clipboard history"
+license = "MIT"
+
+[dependencies]
+eframe = { version = "0.31.1", default-features = false, features = ["default_fonts", "glow", "x11", "wayland"] }
+x11rb = { version = "0.13.2", features = ["xfixes", "xtest"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+chrono = "0.4"
+libloading = "0.8"
+libc = "0.2"
+wayland-client = "0.31"
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+
+[profile.release]
+opt-level = "s"
+lto = "thin"
+strip = true
