@@ -47,3 +47,7 @@ Pause monitoring before copying sensitive material. Content exclusions scan supp
 `cargo test --offline` checks multi-format byte preservation, duplicate suppression, persistence, privacy exclusions, legacy text, Unicode filenames, retention, pinning, image thumbnails and size limits. `cargo fmt -- --check` verifies formatting. Craft Anything's `rebuild_check` builds and captures the running native window.
 
 The current environment passed the build, nine unit tests and the native screenshot check. External application copy/select/paste round trips and cross-desktop Wayland behavior remain unverified: the host runtime tool requires approval that this session cannot grant. A rendered screenshot does not establish those workflows. The native implementation uses egui rather than the originally preferred Tauri stack.
+
+## License
+
+Licensed under the [MIT License](LICENSE). Third-party components retain their respective copyright and license notices.
