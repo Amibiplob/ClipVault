@@ -42,6 +42,13 @@ History defaults to `$XDG_DATA_HOME/clipvault` or `~/.local/share/clipvault`. A 
 
 Pause monitoring before copying sensitive material. Content exclusions scan supported textual representations, including HTML and rich text. Password-manager MIME hints are ignored before reading payloads. Application-name exclusions are available on X11; Wayland data-control does not provide source application identity. Images cannot be filtered by words embedded in their pixels. Clearing history removes saved entries and payloads; it does not clear the active system clipboard or securely erase filesystem backups.
 
+## Linux packages
+
+See [the Linux packaging guide](packaging/README.md) for reusable cargo-deb and
+linuxdeploy/AppImage scripts, dependencies, supported Linux Mint versions and
+x86-64 architecture, output paths, notices, and package smoke checks. Actual
+build results and untested areas are recorded in [packaging/VALIDATION.md](packaging/VALIDATION.md).
+
 ## Validation
 
 `cargo test --offline` checks multi-format byte preservation, duplicate suppression, persistence, privacy exclusions, legacy text, Unicode filenames, retention, pinning, image thumbnails and size limits. `cargo fmt -- --check` verifies formatting. Craft Anything's `rebuild_check` builds and captures the running native window.

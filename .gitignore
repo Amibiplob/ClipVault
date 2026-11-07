@@ -1,5 +1,7 @@
 # Rust build output (keep Cargo.lock tracked for this application).
 /target/
+/dist/
+__pycache__/
 
 # Local environment settings; example files may be committed.
 .env

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=ClipVault
+Comment=Private clipboard history on this computer
+Exec=clipvault
+Icon=clipvault
+Terminal=false
+Categories=Utility;
+Keywords=clipboard;history;paste;
+StartupWMClass=ClipVault

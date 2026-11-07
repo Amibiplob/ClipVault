@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+app_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export LD_LIBRARY_PATH="$app_dir/usr/lib:$app_dir/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# Loader cache paths must be generated after mounting/extracting, never baked in.
+loader_cache=$(mktemp "${TMPDIR:-/tmp}/clipvault-loaders.XXXXXXXX")
+trap 'rm -f -- "$loader_cache"' EXIT
+export GDK_PIXBUF_MODULEDIR="$app_dir/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders"
+export GDK_PIXBUF_MODULE_FILE="$loader_cache"
+"$app_dir/usr/bin/gdk-pixbuf-query-loaders" "$GDK_PIXBUF_MODULEDIR"/*.so > "$loader_cache"
+set +e
+"$app_dir/usr/bin/clipvault" "$@"
+result=$?
+exit "$result"

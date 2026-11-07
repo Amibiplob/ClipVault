@@ -1224,7 +1224,21 @@ fn set_startup(enabled: bool) -> Result<(), String> {
     let dir = config.join("autostart");
     let file = dir.join("clipvault.desktop");
     if enabled {
+        // AppImages mount at temporary paths; login startup needs the stable image.
         let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+        // A launcher such as Craft Anything can itself pass APPIMAGE to native
+        // children. Use it only when this executable belongs to that AppDir.
+        let image_root = std::env::var_os("APPDIR").and_then(|dir| std::fs::canonicalize(dir).ok());
+        let executable = std::env::var_os("APPIMAGE")
+            .map(PathBuf::from)
+            .filter(|path| {
+                path.is_absolute()
+                    && path.is_file()
+                    && image_root
+                        .as_ref()
+                        .is_some_and(|dir| executable.starts_with(dir))
+            })
+            .unwrap_or(executable);
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         let path = executable
             .to_string_lossy()

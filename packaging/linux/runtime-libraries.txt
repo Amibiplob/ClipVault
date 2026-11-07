@@ -1,0 +1,22 @@
+# Libraries opened at runtime by ClipVault, winit, glutin and GdkPixbuf.
+# OpenGL/EGL dispatch libraries and GPU drivers deliberately remain on the host.
+libsqlite3.so.0
+libgdk_pixbuf-2.0.so.0
+libX11.so.6
+libX11-xcb.so.1
+libXcursor.so.1
+libXi.so.6
+libXrandr.so.2
+libXinerama.so.1
+libXrender.so.1
+libXfixes.so.3
+libXext.so.6
+libxkbcommon.so.0
+libxkbcommon-x11.so.0
+libxcb.so.1
+libxcb-render.so.0
+libxcb-shape.so.0
+libxcb-xfixes.so.0
+libwayland-client.so.0
+libwayland-cursor.so.0
+libwayland-egl.so.1
