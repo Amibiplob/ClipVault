@@ -1,3 +1,9 @@
+# Current feature update: 1.1.0
+
+See [FEATURE-VERIFICATION.md](../FEATURE-VERIFICATION.md) for current feature tests and package results. The 1.0.0 evidence below is historical.
+
+---
+
 # Current 1.0.0 validation
 
 See [VERIFICATION.md](../VERIFICATION.md) for the current release results,

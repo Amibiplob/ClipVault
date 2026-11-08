@@ -1,7 +1,11 @@
 mod clipboard;
 mod icons;
+mod shortcut;
 mod storage;
 mod ui;
+#[cfg(test)]
+mod ui_capture;
+mod updates;
 mod wayland;
 use eframe::egui;
 use std::{
@@ -63,6 +67,17 @@ fn launch() -> Result<(), String> {
         "/proc/self/fd/{}/instance.sock",
         root_handle.as_raw_fd()
     ));
+    // Serialize the brief socket-creation phase, so a simultaneous second
+    // launch cannot observe an instance lock before its IPC socket is bound.
+    let startup_guard = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(root.join("startup.lock"))
+        .map_err(|e| e.to_string())?;
+    if unsafe { libc::flock(startup_guard.as_raw_fd(), libc::LOCK_EX) } != 0 {
+        return Err("Could not lock instance startup".into());
+    }
     let lock = fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -86,13 +101,16 @@ fn launch() -> Result<(), String> {
     }
     let _ = fs::remove_file(&socket);
     let listener = UnixListener::bind(&socket).map_err(|e| e.to_string())?;
+    drop(startup_guard);
     let (ipt, ipr) = mpsc::channel();
     std::thread::spawn(move || {
         for mut stream in listener.incoming().flatten() {
             let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(100)));
-            let mut data = [0; 32];
-            if let Ok(n) = stream.read(&mut data) {
-                let _ = ipt.send(String::from_utf8_lossy(&data[..n]).into_owned());
+            let mut data = Vec::new();
+            if (&mut stream).take(32).read_to_end(&mut data).is_ok()
+                && matches!(data.as_slice(), b"toggle" | b"show")
+            {
+                let _ = ipt.send(String::from_utf8_lossy(&data).into_owned());
             }
         }
     });

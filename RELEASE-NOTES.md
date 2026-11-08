@@ -1,3 +1,18 @@
+# ClipVault v1.1.0
+
+Prepared feature update; no release, tag, push, upload, or system installation performed.
+
+- Native press-to-record X11 shortcuts, including Super, with release-to-save, Escape cancellation, confirmed registration, and conflict-safe persistence.
+- Physical-key repeat filtering, explicit minimized-window restoration, immediate event-loop wakeups, and serialized single-instance IPC startup.
+- Redesigned Shortcuts and responsive About pages with developer emphasis, bundled licensed brand icons, and expandable compatibility and license information.
+- Manual GitHub stable update checks; optional once-daily checks off by default, persistent scheduling/backoff/dismissals, semantic version comparisons, and validated manual download links.
+- Accurate update-network privacy wording. Clipboard data never enters update requests. Existing history, images, pins, and preferences are preserved.
+
+Application version 1.1.0; Debian revision 1.1.0-1. See [FEATURE-VERIFICATION.md](FEATURE-VERIFICATION.md) for exact evidence and unverified real-desktop boundaries. Older builds without update checks require this first upgrade to be installed manually.
+
+---
+Historical 1.0.0 notes follow; their verification claims apply to that earlier build only.
+
 # ClipVault v1.0.0
 
 Intended Git tag: `v1.0.0`. No tag, push, publication, or upload is performed by the build scripts.

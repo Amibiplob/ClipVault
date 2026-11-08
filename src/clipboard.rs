@@ -20,7 +20,7 @@ use x11rb::{
 
 pub enum Command {
     Restore(String, Snapshot),
-    Shortcut(String),
+    RecordShortcut(bool),
     Stop,
 }
 #[derive(Debug)]
@@ -30,8 +30,15 @@ pub enum Notice {
     Activated(String),
     ActivationFailed(String, String),
     ShortcutApplied(String),
+    ShortcutActive(String),
+    ShortcutInactive,
+    ShortcutFailed(String),
+    RecordingReady,
+    ShortcutCandidate(String),
+    RecordingCancelled,
     Status(String),
     Error(String),
+    Unavailable(String),
 }
 pub struct Service {
     pub tx: Sender<Command>,
@@ -49,7 +56,7 @@ pub fn start(store: Shared) -> Service {
             run_x11(store, rx, out.clone())
         };
         if let Err(e) = result {
-            let _ = out.send(Notice::Error(e));
+            let _ = out.send(Notice::Unavailable(e));
         }
     });
     Service { tx, rx: events }
@@ -119,6 +126,11 @@ struct X11 {
     transfers: HashMap<(Window, Atom), Transfer>,
     key: Option<(u8, ModMask)>,
     out: Sender<Notice>,
+    press_gate: crate::shortcut::PressGate,
+    repeat_supported: bool,
+    recorder: crate::shortcut::Recorder,
+    recording_keys: std::collections::HashSet<u8>,
+    recorded_result: Option<crate::shortcut::Result>,
 }
 fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
@@ -144,8 +156,8 @@ fn parse_shortcut(shortcut: &str) -> Result<(u32, ModMask), String> {
             _ => return Err(format!("Unknown shortcut modifier: {p}")),
         }
     }
-    if mods & (ModMask::M4 | ModMask::CONTROL | ModMask::M1) == ModMask::default() {
-        return Err("Include Super, Ctrl, or Alt in the shortcut".into());
+    if mods == ModMask::default() {
+        return Err("Include Super, Ctrl, Alt, or Shift in the shortcut".into());
     }
     Ok((ch, mods))
 }
@@ -200,6 +212,29 @@ impl X11 {
         )
         .map_err(err)?;
         c.flush().map_err(err)?;
+        // Detectable repeat produces one real release, rather than synthetic
+        // release/press pairs while held. Never enable an unreliable binding.
+        use x11rb::protocol::xkb::{BoolCtrl, ConnectionExt as _, PerClientFlag, ID};
+        let repeat_supported = c
+            .xkb_use_extension(1, 0)
+            .ok()
+            .and_then(|v| v.reply().ok())
+            .filter(|v| v.supported)
+            .and_then(|_| {
+                c.xkb_per_client_flags(
+                    ID::USE_CORE_KBD.into(),
+                    PerClientFlag::DETECTABLE_AUTO_REPEAT,
+                    PerClientFlag::DETECTABLE_AUTO_REPEAT,
+                    BoolCtrl::default(),
+                    BoolCtrl::default(),
+                    BoolCtrl::default(),
+                )
+                .ok()
+            })
+            .and_then(|v| v.reply().ok())
+            .is_some_and(|v| {
+                v.value & PerClientFlag::DETECTABLE_AUTO_REPEAT != PerClientFlag::default()
+            });
         Ok(Self {
             c,
             screen,
@@ -211,10 +246,18 @@ impl X11 {
             owned: Snapshot::new(),
             transfers: HashMap::new(),
             key: None,
+            press_gate: Default::default(),
+            repeat_supported,
+            recorder: Default::default(),
+            recording_keys: Default::default(),
+            recorded_result: None,
             out,
         })
     }
     fn bind(&mut self, shortcut: &str) -> Result<(), String> {
+        if !self.repeat_supported {
+            return Err("Reliable X11 global shortcuts are unavailable. Configure your desktop to run clipvault --toggle.".into());
+        }
         let (ch, mods) = parse_shortcut(shortcut)?;
         let setup = self.c.setup();
         let mapping = self
@@ -253,7 +296,7 @@ impl X11 {
                     let _ = self.c.ungrab_key(code, root, mask);
                 }
                 let _ = self.c.flush();
-                return Err(format!("{shortcut} is already used by your desktop. Your previous shortcut is still active. Choose another in Settings. ({e})"));
+                return Err(format!("{shortcut} could not be registered; another application or desktop shortcut may already use it. Choose another combination. ({e})"));
             }
             grabbed.push(mask);
         }
@@ -263,10 +306,158 @@ impl X11 {
             }
         }
         self.key = Some((code, mods));
+        self.press_gate.release();
+        if self
+            .c
+            .query_keymap()
+            .map_err(err)?
+            .reply()
+            .map_err(err)?
+            .keys[code as usize / 8]
+            & (1 << (code % 8))
+            != 0
+        {
+            self.press_gate.press();
+        }
         self.c.flush().map_err(err)?;
         Ok(())
     }
+    fn unbind(&mut self) {
+        let _ = self.out.send(Notice::ShortcutInactive);
+        if let Some((code, mods)) = self.key.take() {
+            for extra in [
+                ModMask::default(),
+                ModMask::LOCK,
+                ModMask::M2,
+                ModMask::LOCK | ModMask::M2,
+            ] {
+                let _ =
+                    self.c
+                        .ungrab_key(code, self.c.setup().roots[self.screen].root, mods | extra);
+            }
+        }
+        self.press_gate.release();
+        let _ = self.c.flush();
+    }
+    fn begin_recording(&mut self) -> Result<(), String> {
+        if !self.repeat_supported {
+            return Err("Native recording is unavailable on this X11 server. Configure a desktop shortcut for clipvault --toggle.".into());
+        }
+        self.unbind();
+        let reply = self
+            .c
+            .grab_keyboard(
+                false,
+                self.c.setup().roots[self.screen].root,
+                x11rb::CURRENT_TIME,
+                GrabMode::ASYNC,
+                GrabMode::ASYNC,
+            )
+            .map_err(err)?
+            .reply()
+            .map_err(err)?;
+        if reply.status != GrabStatus::SUCCESS {
+            return Err(
+                "Could not capture the keyboard. Close other shortcut recorders and try again."
+                    .into(),
+            );
+        }
+        self.recorder.begin();
+        self.recorder.ready = true;
+        self.recording_keys.clear();
+        // Track keys already held when the control was clicked too.
+        let map = self.c.query_keymap().map_err(err)?.reply().map_err(err)?;
+        for code in 8..=255u8 {
+            if map.keys[code as usize / 8] & (1 << (code % 8)) != 0 {
+                self.recording_keys.insert(code);
+            }
+        }
+        let _ = self.out.send(Notice::RecordingReady);
+        Ok(())
+    }
+    fn end_recording(&mut self) {
+        self.recorder.recording = false;
+        self.recording_keys.clear();
+        let _ = self.c.ungrab_keyboard(x11rb::CURRENT_TIME);
+        let _ = self.c.flush();
+    }
+    fn record_key(&mut self, event: &Event) -> Option<crate::shortcut::Result> {
+        use eframe::egui::{Event as E, Key, Modifiers};
+        let (e, pressed) = match event {
+            Event::KeyPress(e) => (e, true),
+            Event::KeyRelease(e) => (e, false),
+            _ => return None,
+        };
+        let repeat = pressed && !self.recording_keys.insert(e.detail);
+        if !pressed {
+            self.recording_keys.remove(&e.detail);
+        }
+        let symbol = self
+            .c
+            .get_keyboard_mapping(e.detail, 1)
+            .ok()?
+            .reply()
+            .ok()?
+            .keysyms[0];
+        let modifier_mask = match symbol {
+            0xffe1 | 0xffe2 => u16::from(ModMask::SHIFT),
+            0xffe3 | 0xffe4 => u16::from(ModMask::CONTROL),
+            0xffe9 | 0xffea => u16::from(ModMask::M1),
+            0xffeb | 0xffec | 0xffe7 | 0xffe8 => u16::from(ModMask::M4),
+            _ => 0,
+        };
+        let mut state = u16::from(e.state);
+        if !pressed {
+            state &= !modifier_mask;
+        }
+        let mods = Modifiers {
+            ctrl: state & u16::from(ModMask::CONTROL) != 0,
+            alt: state & u16::from(ModMask::M1) != 0,
+            shift: state & u16::from(ModMask::SHIFT) != 0,
+            mac_cmd: state & u16::from(ModMask::M4) != 0,
+            command: false,
+        };
+        let key = if symbol == 0xff1b {
+            Key::Escape
+        } else {
+            Key::from_name(
+                &(char::from_u32(symbol).unwrap_or(' '))
+                    .to_ascii_uppercase()
+                    .to_string(),
+            )
+            .unwrap_or(Key::Enter)
+        };
+        let events = if modifier_mask == 0 {
+            vec![E::Key {
+                key,
+                physical_key: None,
+                pressed,
+                repeat,
+                modifiers: mods,
+            }]
+        } else {
+            vec![]
+        };
+        let result = self
+            .recorder
+            .input(&events, mods, !self.recording_keys.is_empty(), true);
+        if result.is_none() {
+            let _ = self
+                .out
+                .send(Notice::ShortcutCandidate(self.recorder.display()));
+        }
+        result
+    }
     fn serve(&mut self, e: Event) {
+        // Clipboard transfers also pump X11 events. Capture keyboard input here
+        // so a concurrent clipboard request cannot swallow recording releases.
+        if self.recorder.recording && matches!(e, Event::KeyPress(_) | Event::KeyRelease(_)) {
+            if let Some(result) = self.record_key(&e) {
+                self.end_recording();
+                self.recorded_result = Some(result);
+            }
+            return;
+        }
         match e {
             Event::SelectionRequest(r) => {
                 let prop = if r.property == 0 {
@@ -375,8 +566,19 @@ impl X11 {
                 }
                 let _ = self.c.flush();
             }
-            Event::KeyPress(_) => {
-                let _ = self.out.send(Notice::Open);
+            Event::KeyPress(e)
+                if !self.recorder.recording
+                    && self.key.is_some_and(|(code, _)| code == e.detail) =>
+            {
+                if self.press_gate.press() {
+                    let _ = self.out.send(Notice::Open);
+                }
+            }
+            Event::KeyRelease(e)
+                if !self.recorder.recording
+                    && self.key.is_some_and(|(code, _)| code == e.detail) =>
+            {
+                self.press_gate.release();
             }
             _ => {}
         }
@@ -563,17 +765,104 @@ impl X11 {
         Ok(())
     }
 }
+fn complete_restore(
+    out: &Sender<Notice>,
+    shortcut: String,
+    result: Result<(), String>,
+    feedback: Notice,
+) {
+    match result {
+        Ok(()) => {
+            let _ = out.send(Notice::ShortcutActive(shortcut));
+            let _ = out.send(feedback);
+        }
+        Err(e) => {
+            let _ = out.send(Notice::ShortcutInactive);
+            let _ = out.send(Notice::ShortcutFailed(format!("Previous shortcut could not be restored: {e}. Configure a desktop shortcut or choose another combination.")));
+        }
+    }
+}
+fn restore_shortcut(x: &mut X11, store: &Shared, out: &Sender<Notice>, feedback: Notice) {
+    let shortcut = store.lock().unwrap().settings.shortcut.clone();
+    let result = x.bind(&shortcut);
+    complete_restore(out, shortcut, result, feedback);
+}
+/// Register before persisting, and restore the prior binding on either failure.
+/// The bool on an error says whether restoration was confirmed, never guessed.
+fn change_binding(
+    old: &str,
+    next: &str,
+    mut bind: impl FnMut(&str) -> Result<(), String>,
+    save: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<(), (String, bool)> {
+    if let Err(error) = bind(next).and_then(|_| save(next)) {
+        return match bind(old) {
+            Ok(()) => Err((format!("{error} Previous shortcut retained."), true)),
+            Err(restore) => Err((format!("{error} Previous shortcut could not be restored: {restore}. Use desktop setup."), false)),
+        };
+    }
+    Ok(())
+}
+fn apply_shortcut(x: &mut X11, store: &Shared, out: &Sender<Notice>, shortcut: &str) {
+    let old = store.lock().unwrap().settings.shortcut.clone();
+    let result = change_binding(
+        &old,
+        shortcut,
+        |s| x.bind(s),
+        |next| {
+            let mut s = store.lock().unwrap();
+            s.settings.shortcut = next.into();
+            let result = s.save_settings();
+            if result.is_err() {
+                s.settings.shortcut = old.clone();
+            }
+            result.map_err(|e| format!("Could not save shortcut: {e}"))
+        },
+    );
+    match result {
+        Ok(()) => {
+            let _ = out.send(Notice::ShortcutApplied(shortcut.into()));
+        }
+        Err((error, restored)) => {
+            let _ = out.send(if restored {
+                Notice::ShortcutActive(old)
+            } else {
+                Notice::ShortcutInactive
+            });
+            let _ = out.send(Notice::ShortcutFailed(error));
+        }
+    }
+}
+fn finish_recording(x: &mut X11, store: &Shared, out: &Sender<Notice>) {
+    if let Some(result) = x.recorded_result.take() {
+        match result {
+            crate::shortcut::Result::Saved(s) => apply_shortcut(x, store, out, &s),
+            crate::shortcut::Result::Cancelled => {
+                restore_shortcut(x, store, out, Notice::RecordingCancelled);
+            }
+            crate::shortcut::Result::Invalid => {
+                restore_shortcut(x, store, out, Notice::ShortcutFailed("Use modifiers and one letter or number. Your previous setting is unchanged.".into()));
+            }
+        }
+    }
+}
 pub fn run_x11(store: Shared, rx: Receiver<Command>, out: Sender<Notice>) -> Result<(), String> {
     let mut x = X11::new(out.clone())?;
     let shortcut = store.lock().unwrap().settings.shortcut.clone();
     let _ = out.send(Notice::Status("X11 · monitoring clipboard".into()));
-    if let Err(e) = x.bind(&shortcut) {
-        let _ = out.send(Notice::Error(e));
+    match x.bind(&shortcut) {
+        Ok(()) => {
+            let _ = out.send(Notice::ShortcutActive(shortcut));
+        }
+        Err(e) => {
+            let _ = out.send(Notice::ShortcutFailed(e));
+        }
     }
     let mut dirty = true;
     let mut last_poll = Instant::now();
     let mut last_owner = 0;
     loop {
+        finish_recording(&mut x, &store, &out);
         while let Ok(cmd) = rx.try_recv() {
             match cmd {
                 Command::Stop => return Ok(()),
@@ -597,12 +886,16 @@ pub fn run_x11(store: Shared, rx: Receiver<Command>, out: Sender<Notice>) -> Res
                     }
                     dirty = false;
                 }
-                Command::Shortcut(s) => {
-                    let notice = match x.bind(&s) {
-                        Ok(()) => Notice::ShortcutApplied(s),
-                        Err(e) => Notice::Error(e),
-                    };
-                    let _ = out.send(notice);
+                Command::RecordShortcut(start) => {
+                    if start && !x.recorder.recording {
+                        if let Err(e) = x.begin_recording() {
+                            x.end_recording();
+                            restore_shortcut(&mut x, &store, &out, Notice::ShortcutFailed(e));
+                        }
+                    } else if !start {
+                        x.end_recording();
+                        restore_shortcut(&mut x, &store, &out, Notice::RecordingCancelled);
+                    }
                 }
             }
         }
@@ -613,6 +906,7 @@ pub fn run_x11(store: Shared, rx: Receiver<Command>, out: Sender<Notice>) -> Res
             }
             x.serve(e);
         }
+        finish_recording(&mut x, &store, &out);
         if last_poll.elapsed() > Duration::from_millis(250) {
             last_poll = Instant::now();
             let owner =
@@ -670,6 +964,74 @@ pub fn run_x11(store: Shared, rx: Receiver<Command>, out: Sender<Notice>) -> Res
 mod tests {
     use super::*;
     #[test]
+    fn cancellation_does_not_claim_restoration_after_registration_failure() {
+        for success in [true, false] {
+            let (tx, rx) = mpsc::channel();
+            complete_restore(
+                &tx,
+                "Super+V".into(),
+                if success {
+                    Ok(())
+                } else {
+                    Err("Desktop grabbed it".into())
+                },
+                Notice::RecordingCancelled,
+            );
+            let events: Vec<_> = rx.try_iter().collect();
+            assert_eq!(events.len(), 2);
+            if success {
+                assert!(matches!(events[0], Notice::ShortcutActive(_)));
+                assert!(matches!(events[1], Notice::RecordingCancelled));
+            } else {
+                assert!(matches!(events[0], Notice::ShortcutInactive));
+                assert!(matches!(events[1], Notice::ShortcutFailed(_)));
+            }
+        }
+    }
+    #[test]
+    fn conflicts_and_failed_save_keep_previous_binding_and_settings() {
+        use std::cell::RefCell;
+        for failure in ["conflict", "save", "none"] {
+            let bound = RefCell::new("Super+V".to_string());
+            let saved = RefCell::new("Super+V".to_string());
+            let result = change_binding(
+                "Super+V",
+                "Ctrl+Alt+V",
+                |s| {
+                    if failure == "conflict" && s == "Ctrl+Alt+V" {
+                        return Err("Already in use".into());
+                    }
+                    *bound.borrow_mut() = s.into();
+                    Ok(())
+                },
+                |s| {
+                    if failure == "save" {
+                        return Err("Disk error".into());
+                    }
+                    *saved.borrow_mut() = s.into();
+                    Ok(())
+                },
+            );
+            if failure == "none" {
+                assert!(result.is_ok());
+                assert_eq!(*saved.borrow(), "Ctrl+Alt+V");
+            } else {
+                assert!(matches!(result, Err((_, true))));
+                assert_eq!(*saved.borrow(), "Super+V");
+                assert_eq!(*bound.borrow(), "Super+V");
+            }
+        }
+        assert!(matches!(
+            change_binding(
+                "Super+V",
+                "Ctrl+V",
+                |_| Err("Desktop refused".into()),
+                |_| Ok(())
+            ),
+            Err((_, false))
+        ));
+    }
+    #[test]
     fn shortcuts_require_a_primary_modifier_and_single_key() {
         assert_eq!(
             parse_shortcut(" Ctrl + Alt + V ").unwrap(),
@@ -679,7 +1041,7 @@ mod tests {
             parse_shortcut("Super+Shift+V").unwrap(),
             (b'v' as u32, ModMask::M4 | ModMask::SHIFT)
         );
-        for invalid in ["V", "Shift+V", "Super+", "Super+Enter", "Unknown+V", ""] {
+        for invalid in ["V", "Super+", "Super+Enter", "Unknown+V", ""] {
             assert!(parse_shortcut(invalid).is_err(), "{invalid}");
         }
     }

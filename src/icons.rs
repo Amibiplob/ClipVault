@@ -19,6 +19,30 @@ pub fn draw(p: &Painter, r: Rect, name: &str, color: Color32) {
         );
     };
     match name {
+        "globe" => {
+            p.circle_stroke(c, 9. * z, stroke);
+            p.add(Shape::ellipse_stroke(c, vec2(4. * z, 9. * z), stroke));
+            line(&[(3., 12.), (21., 12.)]);
+        }
+        "external" => {
+            line(&[(6., 18.), (18., 6.), (9., 6.)]);
+            line(&[(18., 6.), (18., 15.)]);
+        }
+        "download" => {
+            line(&[(12., 3.), (12., 15.), (7., 10.)]);
+            line(&[(12., 15.), (17., 10.)]);
+            line(&[(4., 15.), (4., 21.), (20., 21.), (20., 15.)]);
+        }
+        "bug" => {
+            p.circle_stroke(c, 6. * z, stroke);
+            line(&[(8., 6.), (6., 3.)]);
+            line(&[(16., 6.), (18., 3.)]);
+            for y in [8., 12., 16.] {
+                line(&[(2., y), (6., y)]);
+                line(&[(18., y), (22., y)]);
+            }
+            line(&[(12., 9.), (12., 18.)]);
+        }
         "clipboard" => {
             rect(5., 5., 14., 16., 2.);
             rect(9., 2., 6., 5., 1.);

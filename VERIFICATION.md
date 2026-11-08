@@ -1,3 +1,9 @@
+# Current feature update: 1.1.0
+
+See [FEATURE-VERIFICATION.md](FEATURE-VERIFICATION.md) for current feature tests and package results. The 1.0.0 evidence below is historical.
+
+---
+
 # ClipVault v1.0.0 completion report
 
 ## Latest: activation and header correction — 2026-11-07

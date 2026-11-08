@@ -1,6 +1,6 @@
 [package]
 name = "clipvault"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 description = "Private native Linux clipboard history"
 license = "MIT"
@@ -32,6 +32,7 @@ assets = [
     ["README.md", "usr/share/doc/clipvault/README.md", "644"],
     ["RELEASE-NOTES.md", "usr/share/doc/clipvault/RELEASE-NOTES.md", "644"],
     ["VERIFICATION.md", "usr/share/doc/clipvault/VERIFICATION.md", "644"],
+    ["FEATURE-VERIFICATION.md", "usr/share/doc/clipvault/FEATURE-VERIFICATION.md", "644"],
     ["ACTIVATION-VERIFICATION.md", "usr/share/doc/clipvault/ACTIVATION-VERIFICATION.md", "644"],
     ["docs/history.png", "usr/share/doc/clipvault/docs/history.png", "644"],
     ["assets/clipvault.svg", "usr/share/doc/clipvault/assets/clipvault.svg", "644"],
@@ -40,12 +41,14 @@ assets = [
 
 [dependencies]
 eframe = { version = "0.31.1", default-features = false, features = ["default_fonts", "glow", "x11", "wayland"] }
-x11rb = { version = "0.13.2", features = ["xfixes", "xtest"] }
+x11rb = { version = "0.13.2", features = ["xfixes", "xtest", "xkb"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 chrono = "0.4"
 libloading = "0.8"
+semver = "1.0"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 libc = "0.2"
 wayland-client = "0.31"
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }

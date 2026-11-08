@@ -87,6 +87,7 @@ def notices(check):
         # Only egui's embedded fonts are shipped; dependency test fonts are not.
         for font in sorted((source / "fonts").glob("*.ttf")) if name == "epaint_default_fonts" else []:
             chunks.append(f"\n--- {font.name} embedded attribution ---\n{font_notices(font)}\n")
+    chunks.append("\n" + "=" * 72 + "\nBundled Bootstrap social icons\n" + (ROOT / "assets/social/LICENSE.txt").read_text())
     chunks.append("\n" + "=" * 72 + "\nassets/Interface.ttf (Noto Sans Regular)\n" + font_notices(ROOT / "assets/Interface.ttf") + "\n" + (ROOT / "assets/Interface.ttf.LICENSE").read_text())
     # Rust's linked standard library has dependencies outside Cargo.lock.
     class RustNotices(HTMLParser):
@@ -139,7 +140,7 @@ def stage():
         copy(ROOT / f"assets/icons/{size}x{size}/clipvault.png", f"usr/share/icons/hicolor/{size}x{size}/apps/clipvault.png")
     (APPDIR / "clipvault.svg").symlink_to("usr/share/icons/hicolor/scalable/apps/clipvault.svg")
     (APPDIR / ".DirIcon").symlink_to("clipvault.svg")
-    for name in ["LICENSE", "THIRD-PARTY-NOTICES.txt", "README.md", "RELEASE-NOTES.md", "VERIFICATION.md", "ACTIVATION-VERIFICATION.md"]:
+    for name in ["LICENSE", "THIRD-PARTY-NOTICES.txt", "README.md", "RELEASE-NOTES.md", "VERIFICATION.md", "ACTIVATION-VERIFICATION.md", "FEATURE-VERIFICATION.md"]:
         copy(ROOT / name, "usr/share/doc/clipvault/" + name)
     copy(ROOT / "packaging/README.md", "usr/share/doc/clipvault/PACKAGING.md")
     copy(ROOT / "docs/history.png", "usr/share/doc/clipvault/docs/history.png")

@@ -1,8 +1,8 @@
-# ClipVault 1.0.0
+# ClipVault 1.1.0
 
 <img src="assets/clipvault.svg" width="80" alt="ClipVault logo">
 
-A native Linux clipboard manager written in Rust with egui and SQLite. Keep useful text, images, links, rich text, and file references on this computer, then recall them from history and paste with your usual **Ctrl+V**. No account, telemetry, or cloud service. The original logo is `assets/clipvault.svg`; bundled PNGs are rasterizations of that file.
+A native Linux clipboard manager written in Rust with egui and SQLite. Keep useful text, images, links, rich text, and file references on this computer, then recall them from history and paste with your usual **Ctrl+V**. No account, telemetry, or cloud sync. The original logo is `assets/clipvault.svg`; bundled PNGs are rasterizations of that file.
 
 ![ClipVault 1.0.0 native history and preview](docs/history.png)
 
@@ -30,18 +30,18 @@ LDAI_RUNTIME_FILE="$PWD/target/packaging-tools/runtime-x86_64" bash scripts/pack
 bash scripts/test-linux-packages.sh
 ```
 
-If tools are missing, run `bash scripts/install-packaging-tools.sh` with internet access; the packaging guide lists the apt prerequisites. Output names are `dist/clipvault_1.0.0-1_amd64.deb` and `dist/ClipVault-1.0.0-x86_64.AppImage` after successful packaging. The Debian revision is `-1`.
+If tools are missing, run `bash scripts/install-packaging-tools.sh` with internet access; the packaging guide lists the apt prerequisites. Output names are `dist/clipvault_1.1.0-1_amd64.deb` and `dist/ClipVault-1.1.0-x86_64.AppImage` after successful packaging. The Debian revision is `-1`.
 
 ```sh
-sudo apt install ./dist/clipvault_1.0.0-1_amd64.deb
+sudo apt install ./dist/clipvault_1.1.0-1_amd64.deb
 # Or run the portable application:
-chmod +x dist/ClipVault-1.0.0-x86_64.AppImage
-./dist/ClipVault-1.0.0-x86_64.AppImage
+chmod +x dist/ClipVault-1.1.0-x86_64.AppImage
+./dist/ClipVault-1.1.0-x86_64.AppImage
 # Optional explicit AppImage user-menu installation:
 bash scripts/install-appimage.sh
 ```
 
-AppImage menu installation copies the image to `~/.local/bin/clipvault.AppImage`, installs the same icons under the user's hicolor theme, and creates the matching desktop entry. Running an AppImage alone does not install a menu launcher. No release is automatically uploaded or published. Release notes: [ClipVault v1.0.0](RELEASE-NOTES.md); intended Git tag: `v1.0.0`.
+AppImage menu installation copies the image to `~/.local/bin/clipvault.AppImage`, installs the same icons under the user's hicolor theme, and creates the matching desktop entry. Running an AppImage alone does not install a menu launcher. No release is automatically uploaded or published. Release notes: [ClipVault v1.1.0](RELEASE-NOTES.md); intended Git tag: `v1.1.0`.
 
 ## Capture and reuse
 
@@ -64,6 +64,28 @@ Closing the window hides it and keeps monitoring and clipboard ownership running
 
 `clipvault --background` starts hidden. `clipvault --toggle` toggles the existing window. `--data-dir DIRECTORY` isolates a separate history and instance; use that same directory in your desktop shortcut. `--diagnostics` prints desktop environment information.
 
+## Record the history shortcut
+
+On X11, open **Settings → Shortcuts** and click the large shortcut control. It displays **Press your shortcut**. Hold Super (the Windows key) and press V to see **Super + V**, or combine Ctrl, Alt, Shift, and Super with one letter or number. Release every key to register and save automatically; there is no Apply button. A modifier alone is never saved. **Escape** cancels and restores the previous binding. Invalid combinations, conflicts, and save errors retain the previous setting; the UI reports a binding as active only after registration succeeds. If the desktop takes the old binding while recording and restoration fails, the UI reports it unavailable rather than claiming it still works.
+
+Native X11 capture includes Super even though egui’s Linux modifier events omit that key. During recording, local shortcuts, global toggles, and incoming toggle commands are suppressed. Settings persist after restart and the saved binding is registered again, with any new conflict reported accurately. X11 servers without detectable key repeat require a desktop binding instead of an unreliable grab.
+
+One physical shortcut press shows and focuses hidden history; the next hides it. A minimized window restores and focuses on the next press. Held-key repeats and key releases do not toggle again. Close, Escape, and optional hide-after-copy keep monitoring and clipboard ownership alive; **Quit ClipVault** stops the app. A second launch and `clipvault --toggle` use the existing instance for the same canonical data directory. Simultaneous starts serialize IPC socket setup.
+
+On Wayland, expand **Wayland & desktop shortcut setup**. Direct global registration and native Super capture are unavailable through this app’s data-control integration. Configure `clipvault --toggle` in GNOME/KDE’s shortcut settings or your compositor configuration, using the installed binary’s absolute path when needed. For Sway, use `bindsym --no-repeat $mod+v exec /absolute/path/to/clipvault --toggle`; for Hyprland, use `bind = SUPER, V, exec, /absolute/path/to/clipvault --toggle`, not a repeating binding. Use the same `--data-dir` if customized. Wayland clipboard protocol availability is a separate limitation from shortcut configuration.
+
+## App updates and privacy
+
+**Clipboard history stays on this device. Checking for updates contacts GitHub. Clipboard content is never sent.** No saved clips, excluded phrases, personal file paths, or analytics are transmitted. Your IP address and the app’s versioned User-Agent are visible to GitHub as part of the HTTPS request. Opening developer or release links also contacts those sites through your browser.
+
+In **Settings → About → App updates**, click **Check for updates**. **Automatically check once a day** is optional and **OFF by default**. With it off, ClipVault starts no automatic update requests. The preference, last-attempt status, daily scheduling, rate-limit backoff, and dismissed release version are saved locally. An already started request may finish if you turn the option off; no further automatic requests start. Automatic failures stay in the update status and do not interrupt clipboard work or retry repeatedly.
+
+ClipVault checks public stable releases from [Amibiplob/ClipVault](https://github.com/Amibiplob/ClipVault) using GitHub’s documented HTTPS API. Optional leading `v` is accepted; semantic versions are compared numerically (1.10.0 is newer than 1.9.0). Drafts and prereleases are ignored. Newer installed builds are never offered a downgrade. Malformed release versions, offline requests, timeouts, and rate limits are shown as unavailable checks, never as proof the app is current. The latest-release endpoint’s 404 response is shown as no stable release available. Requests run outside the UI thread, with a 5-second connection / 12-second overall timeout, a 512 KiB body limit, restricted redirects, and no concurrent checks.
+
+For an update, **View release / Download** opens a validated official ClipVault GitHub release page. Choose the `.deb` or AppImage and **install it manually**; ClipVault never downloads, executes, or installs updates. **Remind me later** suppresses automatic reminders for that same version across restarts. A later version can notify again.
+
+**Older builds without update checking must first be updated manually to a build containing this feature.** They cannot receive the first in-app notice retroactively. Keep the existing data directory when upgrading; history, image payloads, pins, and settings remain local and are preserved.
+
 ## Pins, cleanup, and editing
 
 Pinned clips never expire automatically, never count toward the unpinned limit, and survive the default **Clear unpinned history** action. Deleting an individual pinned clip requires explicit confirmation. Unpinning makes it eligible for cleanup.
@@ -83,9 +105,9 @@ All five pages scroll within the resizable window:
 
 - **General:** start at login, pause, consecutive duplicate policy, hide after successful copy, independent cleanup rules, clip size, and confirmed unpinned clearing.
 - **Appearance:** dark/light theme, compact/comfortable density, and always-on-top.
-- **Shortcuts:** configurable global history shortcut and conflict/error reporting; implemented local shortcuts below.
+- **Shortcuts:** press-to-record global history shortcut, confirmed registration feedback, keycap reference, and expandable desktop setup help.
 - **Privacy:** textual content exclusions, X11 application exclusions, sensitive MIME hints, location, and accurate unencrypted storage status.
-- **About:** package-derived version, existing logo, MIT licensing, developer links, and desktop support limits.
+- **About:** package-derived version, existing logo, developer links, optional update checks, and expandable MIT, third-party license, and desktop compatibility information.
 
 Identical supported-format snapshots always share one record. With **Skip consecutive duplicates** enabled, repeating the current most recent snapshot leaves recency unchanged; disabling it refreshes recency. Capturing an older duplicate refreshes its existing record. ClipVault's own clipboard writes are suppressed.
 
@@ -107,7 +129,7 @@ Default client size is approximately 820×620, with a 440×420 minimum and monit
 
 X11 uses native selections (including incremental transfers), format preservation, and registered global shortcuts. A conflicting shortcut reports an error and retains the prior binding. Text restoration adds standard UTF-8 aliases for clients that request them. The service remains alive while the UI is hidden.
 
-Wayland requires **ext-data-control-v1** or **wlr-data-control-v1**. Configure your compositor's shortcut to execute `/absolute/path/to/clipvault --toggle`; setting its label in ClipVault does not register a compositor shortcut. GNOME Wayland commonly does not expose data-control. Use an appropriate extension or an X11 session; unavailable access is reported instead of claiming capture. Data-control acknowledgement is not proof that every destination app will accept a paste.
+Wayland requires **ext-data-control-v1** or **wlr-data-control-v1**. Configure your compositor's shortcut to execute `/absolute/path/to/clipvault --toggle`; recording in a desktop’s own shortcut settings is required; ClipVault does not claim to register a compositor shortcut. GNOME Wayland commonly does not expose data-control. Use an appropriate extension or an X11 session; unavailable access is reported instead of claiming capture. Data-control acknowledgement is not proof that every destination app will accept a paste.
 
 Content exclusions scan textual representations, not words inside images. Supported password-manager/sensitive MIME hints are skipped before payload capture. X11 application exclusions use the active window's class, which can differ from the actual clipboard owner. Wayland does not expose the source application name. These exclusions cannot guarantee protection for every sensitive app; pause monitoring when needed.
 
@@ -119,7 +141,7 @@ History is **not encrypted**. Linux account file permissions provide local acces
 
 ```sh
 python3 scripts/audit-icons.py          # read-only; identifies stale/duplicate launchers
-sudo apt install --reinstall ./dist/clipvault_1.0.0-1_amd64.deb
+sudo apt install --reinstall ./dist/clipvault_1.1.0-1_amd64.deb
 sudo gtk-update-icon-cache -f -t /usr/share/icons/hicolor
 sudo update-desktop-database /usr/share/applications
 desktop-file-validate /usr/share/applications/io.clipvault.desktop.desktop
@@ -131,7 +153,7 @@ Expected X11 class includes `clipvault`, and `_NET_WM_ICON` should contain logo 
 
 **Clipboard activation errors:** inspect the in-app error and `clipvault --diagnostics`; check X11/Wayland capability, avoid a second manager aggressively taking ownership, and ensure saved payload files remain readable. Keep ClipVault running, retry Copy, then Ctrl+V in the target app. Do not delete your database to troubleshoot.
 
-The inspected selection path intentionally hides the window after acknowledged clipboard activation when **Hide after successfully copying a clip** is enabled; this is not evidence of a crash. New configurations now default this setting to **OFF**; explicitly saved ON/OFF preferences are preserved. When OFF, selecting text or an image keeps the window open with brief **Copied** feedback. Copy failures keep it open with an error. Selection follows clip identity when the list reorders. The header gear toggles Settings/history and Close only hides; use Settings → About to quit. See [the activation investigation](ACTIVATION-VERIFICATION.md) for the separate text/image checks and desktop limitations. Native launch/capture checks and automated tests do not establish installed external-application paste behavior or reboot persistence. See [VERIFICATION.md](VERIFICATION.md) for exact evidence and manual steps. Only current screenshots that were actually captured are included under `docs/` when available; reference mockups are not application screenshots.
+The inspected selection path intentionally hides the window after acknowledged clipboard activation when **Hide after successfully copying a clip** is enabled; this is not evidence of a crash. New configurations now default this setting to **OFF**; explicitly saved ON/OFF preferences are preserved. When OFF, selecting text or an image keeps the window open with brief **Copied** feedback. Copy failures keep it open with an error. Selection follows clip identity when the list reorders. The header gear toggles Settings/history and Close only hides; use Settings → About to quit. See [the activation investigation](ACTIVATION-VERIFICATION.md) for the separate text/image checks and desktop limitations. Native launch/capture checks and automated tests do not establish installed external-application paste behavior or reboot persistence. See [VERIFICATION.md](VERIFICATION.md) for historical evidence and [FEATURE-VERIFICATION.md](FEATURE-VERIFICATION.md) for this 1.1.0 update’s checks and remaining desktop verification. Only current screenshots that were actually captured are included under `docs/` when available; reference mockups are not application screenshots.
 
 ## Bug reports, developer, license
 
