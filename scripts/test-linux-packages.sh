@@ -81,6 +81,27 @@ for package in libsqlite3-0 libgdk-pixbuf-2.0-0 libx11-6 libxkbcommon0 libwaylan
     [[ $dependencies == *"$package"* ]]
 done
 dpkg-deb -x "$deb" "$work/deb"
+python3 - "$deb" "$work/deb" <<'PY'
+import pathlib, subprocess, sys, tomllib, xml.etree.ElementTree as ET
+
+deb, tree = sys.argv[1], pathlib.Path(sys.argv[2])
+package = tomllib.loads(pathlib.Path('Cargo.toml').read_text())['package']
+expected = package['metadata']['deb']['extended-description']
+description = subprocess.check_output(['dpkg-deb', '-f', deb, 'Description'], text=True)
+assert ' '.join(description.split()) == package['description'] + ' ' + expected, description
+assert (tree / 'usr/share/doc/clipvault/README.md').read_bytes() == pathlib.Path('README.md').read_bytes()
+metainfo = tree / 'usr/share/metainfo/io.clipvault.desktop.metainfo.xml'
+assert metainfo.read_bytes() == pathlib.Path('packaging/linux/io.clipvault.desktop.metainfo.xml').read_bytes()
+component = ET.parse(metainfo).getroot()
+assert component.findtext('name') == 'ClipVault'
+assert component.findtext('pkgname') == 'clipvault'
+assert component.findtext("launchable[@type='desktop-id']") == 'io.clipvault.desktop.desktop'
+assert component.findtext('description/p') == expected
+url = component.findtext("screenshots/screenshot[@type='default']/image[@type='source']")
+assert url == 'https://raw.githubusercontent.com/Amibiplob/ClipVault/main/docs/history.png'
+subprocess.run(['appstreamcli', 'validate', '--no-net', '--strict', str(metainfo)], check=True)
+print('PASS: Debian plain-text description, separate README, packaged AppStream metadata and screenshot URL configuration (network not tested)')
+PY
 check_tree "$work/deb" "$work/deb/usr/bin/clipvault" deb
 python3 "$root/scripts/check-packaged-runtime.py"
 mkdir "$work/image"

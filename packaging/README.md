@@ -39,7 +39,7 @@ These commands install build tools and libraries, not ClipVault itself:
 ```sh
 sudo apt update
 sudo apt install build-essential binutils file pkg-config dpkg-dev python3 curl \
-  ca-certificates desktop-file-utils ripgrep \
+  ca-certificates desktop-file-utils appstream ripgrep \
   libsqlite3-0 libgdk-pixbuf-2.0-0 libgdk-pixbuf2.0-bin webp-pixbuf-loader \
   libx11-6 libx11-xcb1 libxcursor1 libxi6 libxrandr2 libxinerama1 libxrender1 \
   libxfixes3 libxext6 libxkbcommon0 libxkbcommon-x11-0 libxcb1 libxcb-render0 \
@@ -137,6 +137,20 @@ build the executable and stage an AppDir without packaging tools. Staging alone
 does not create a distribution package or apply linuxdeploy's ELF path adjustments.
 
 ## Contents and dependencies
+
+The Debian control description uses explicit plain text from
+`package.metadata.deb.extended-description`; the README remains a separate file
+at `/usr/share/doc/clipvault/README.md`. The Debian package also installs
+`/usr/share/metainfo/io.clipvault.desktop.metainfo.xml`, with ClipVault's display
+name, package name, desktop launcher ID, and an HTTPS screenshot URL for
+`docs/history.png`. Packaging validates that metadata offline with `appstreamcli`;
+an offline validation does not verify the public image URL.
+
+See [Software Manager verification](SOFTWARE-MANAGER-VERIFICATION.md) for the
+current checks, network/installation restrictions, and the separate Mint 8.4.0
+limitation: its Debian screenshot path does not consume packaged AppStream
+screenshots. Installing a standalone `.deb` therefore does not by itself supply
+a screenshot to that version of Software Manager.
 
 Both formats include the release executable, desktop launcher, original
 ClipVault SVG icon, full MIT LICENSE, README, this guide, and

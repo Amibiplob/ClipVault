@@ -6,6 +6,7 @@ description = "Private native Linux clipboard history"
 license = "MIT"
 
 [package.metadata.deb]
+extended-description = "ClipVault keeps a local history of copied text and images. Open it with a keyboard shortcut to search, pin, and reuse previous clips."
 maintainer = "Md Biplob Hosain"
 copyright = "2026, Md Biplob Hosain"
 license-file = ["LICENSE", "0"]
@@ -18,6 +19,7 @@ maintainer-scripts = "packaging/linux"
 assets = [
     ["target/release/clipvault", "usr/bin/clipvault", "755"],
     ["packaging/linux/io.clipvault.desktop.desktop", "usr/share/applications/io.clipvault.desktop.desktop", "644"],
+    ["packaging/linux/io.clipvault.desktop.metainfo.xml", "usr/share/metainfo/io.clipvault.desktop.metainfo.xml", "644"],
     ["assets/clipvault.svg", "usr/share/icons/hicolor/scalable/apps/clipvault.svg", "644"],
     ["assets/icons/16x16/clipvault.png", "usr/share/icons/hicolor/16x16/apps/clipvault.png", "644"],
     ["assets/icons/24x24/clipvault.png", "usr/share/icons/hicolor/24x24/apps/clipvault.png", "644"],
@@ -37,6 +39,7 @@ assets = [
     ["docs/history.png", "usr/share/doc/clipvault/docs/history.png", "644"],
     ["assets/clipvault.svg", "usr/share/doc/clipvault/assets/clipvault.svg", "644"],
     ["packaging/README.md", "usr/share/doc/clipvault/PACKAGING.md", "644"],
+    ["packaging/SOFTWARE-MANAGER-VERIFICATION.md", "usr/share/doc/clipvault/SOFTWARE-MANAGER-VERIFICATION.md", "644"],
 ]
 
 [dependencies]

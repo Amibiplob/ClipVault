@@ -143,6 +143,7 @@ def stage():
     for name in ["LICENSE", "THIRD-PARTY-NOTICES.txt", "README.md", "RELEASE-NOTES.md", "VERIFICATION.md", "ACTIVATION-VERIFICATION.md", "FEATURE-VERIFICATION.md"]:
         copy(ROOT / name, "usr/share/doc/clipvault/" + name)
     copy(ROOT / "packaging/README.md", "usr/share/doc/clipvault/PACKAGING.md")
+    copy(ROOT / "packaging/SOFTWARE-MANAGER-VERIFICATION.md", "usr/share/doc/clipvault/SOFTWARE-MANAGER-VERIFICATION.md")
     copy(ROOT / "docs/history.png", "usr/share/doc/clipvault/docs/history.png")
     copy(ROOT / "assets/clipvault.svg", "usr/share/doc/clipvault/assets/clipvault.svg")
     paths = library_paths()

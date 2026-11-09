@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.clipvault.desktop</id>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <name>ClipVault</name>
+  <summary>Search, pin, and reuse your local clipboard history</summary>
+  <description>
+    <p>ClipVault keeps a local history of copied text and images. Open it with a keyboard shortcut to search, pin, and reuse previous clips.</p>
+  </description>
+  <pkgname>clipvault</pkgname>
+  <launchable type="desktop-id">io.clipvault.desktop.desktop</launchable>
+  <developer id="io.github.amibiplob">
+    <name>Md Biplob Hosain</name>
+  </developer>
+  <url type="homepage">https://github.com/Amibiplob/ClipVault</url>
+  <url type="bugtracker">https://github.com/Amibiplob/ClipVault/issues</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Clipboard history with search and clip preview</caption>
+      <image type="source" width="820" height="620">https://raw.githubusercontent.com/Amibiplob/ClipVault/main/docs/history.png</image>
+    </screenshot>
+  </screenshots>
+  <categories>
+    <category>Utility</category>
+  </categories>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="1.1.0" date="2026-11-08" />
+  </releases>
+</component>

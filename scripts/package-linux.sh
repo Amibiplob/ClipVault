@@ -21,6 +21,7 @@ fi
 cargo build --release --locked --offline
 python3 scripts/packaging-support.py notices --check
 desktop-file-validate packaging/linux/io.clipvault.desktop.desktop
+appstreamcli validate --no-net --strict packaging/linux/io.clipvault.desktop.metainfo.xml
 version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
 mkdir -p dist
 if [[ $mode == all || $mode == deb ]]; then
