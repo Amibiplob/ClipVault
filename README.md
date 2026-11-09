@@ -104,7 +104,7 @@ The multiline editor offers **Save as new clip**, **Save and copy**, and Cancel/
 All five pages scroll within the resizable window:
 
 - **General:** start at login, pause, consecutive duplicate policy, hide after successful copy, independent cleanup rules, clip size, and confirmed unpinned clearing.
-- **Appearance:** dark/light theme, compact/comfortable density, and always-on-top.
+- **Appearance:** dark/light theme, Compact/Comfortable display modes, and always-on-top. Compact shows short text previews and small image thumbnails without timestamps, format labels, or the preview pane; item menus retain Copy, Pin/Unpin, Edit for text/links, and Delete. Comfortable keeps normal spacing, details, and previews. The selected mode is saved across restarts; both modes keep search, filters, links, files, history, and pins.
 - **Shortcuts:** press-to-record global history shortcut, confirmed registration feedback, keycap reference, and expandable desktop setup help.
 - **Privacy:** textual content exclusions, X11 application exclusions, sensitive MIME hints, location, and accurate unencrypted storage status.
 - **About:** package-derived version, existing logo, developer links, optional update checks, and expandable MIT, third-party license, and desktop compatibility information.
