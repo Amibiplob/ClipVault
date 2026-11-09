@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClipVault — Clipboard History Manager for Linux Mint</title>
+<meta name="description" content="ClipVault is an open-source clipboard history manager for Linux Mint. Find, pin, and reuse copied text and images. Download the .deb package or AppImage.">
+<meta property="og:title" content="ClipVault — Clipboard History Manager for Linux Mint">
+<meta property="og:description" content="Find, pin, and reuse copied text and images with an open-source Linux clipboard manager.">
+<meta name="theme-color" content="#18171f">
+<style>
+:root{color-scheme:dark;--bg:#18171f;--panel:#22202b;--line:#3a3347;--text:#f3eefb;--soft:#bcb2cb;--accent:#d2baff}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(ellipse at 75% 0%,#2d233b,transparent 53%),var(--bg);color:var(--text);font:16px/1.6 system-ui,sans-serif}
+a{color:var(--accent);text-underline-offset:4px}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:5px}
+.wrap{max-width:1050px;margin:auto;padding-inline:clamp(20px,5vw,52px)}
+header,.actions,.brand{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+header{justify-content:space-between;padding-block:24px;border-bottom:1px solid var(--line)}
+.brand{font-weight:700;font-size:20px}
+.mark{display:grid;place-items:center;width:36px;height:36px;border-radius:10px;background:#3b2e51;color:var(--accent)}
+.hero{display:grid;grid-template-columns:1.15fr 1fr;align-items:center;gap:clamp(24px,5vw,65px);padding-block:clamp(45px,9vw,100px)}
+.eyebrow{color:var(--accent);font-size:.8rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+h1{font-size:clamp(2.7rem,6vw,4.6rem);line-height:1.03;letter-spacing:-.05em;margin:12px 0 20px}
+h2{font-size:1.65rem;margin:0 0 12px}
+h3{margin:0 0 6px;font-size:1.05rem}
+p{color:var(--soft);margin:0 0 14px}
+.actions{margin-top:25px}
+.button{display:inline-block;background:var(--accent);color:#231633;border-radius:8px;padding:10px 17px;font-weight:700;text-decoration:none}
+.button:hover{background:#e4d4ff}
+.sample{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:0 16px 44px #100e1855}
+.sample-title{display:flex;justify-content:space-between;align-items:center;gap:10px;font-weight:650;margin-bottom:14px}
+.sample-title small{color:var(--soft);font-weight:400}
+.clip{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid transparent;border-radius:8px;margin-top:7px}
+.clip.selected{background:#352b47;border-color:#615079}
+.clip small{display:block;color:var(--soft)}
+.clip-icon{width:26px;text-align:center;color:var(--accent)}
+.features{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;padding-bottom:44px}
+.feature{padding-top:16px;border-top:1px solid var(--line)}
+.downloads{padding:24px;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+footer{margin-top:36px;padding-block:20px;border-top:1px solid var(--line);color:var(--soft);font-size:.9rem}
+@media(max-width:650px){.hero,.features{grid-template-columns:1fr}.features{gap:10px}.sample{max-width:460px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="brand"><span class="mark" aria-hidden="true"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3M9 12h6m-6 4h6"/><rect x="9" y="2" width="6" height="5" rx="1"/></svg></span>ClipVault</div>
+  <a href="https://github.com/Amibiplob/ClipVault">View on GitHub</a>
+</header>
+<main>
+  <section class="hero">
+    <div>
+      <div class="eyebrow">Open source · Made for Linux</div>
+      <h1>Clipboard history for Linux Mint</h1>
+      <p>ClipVault keeps copied text and images handy. Open your clipboard history with a shortcut, find an earlier clip, and paste it again.</p>
+      <div class="actions"><a class="button" href="https://github.com/Amibiplob/ClipVault/releases/latest">Download ClipVault</a><a href="#install">Installation options</a></div>
+    </div>
+    <div class="sample" aria-label="Example clipboard history">
+      <div class="sample-title">Clipboard history <small>Example</small></div>
+      <div class="clip selected"><span class="clip-icon" aria-hidden="true">Aa</span><div>Release checklist<small>Text · Just now</small></div></div>
+      <div class="clip"><span class="clip-icon" aria-hidden="true">▧</span><div>Copied image<small>Image · 2 minutes ago</small></div></div>
+      <div class="clip"><span class="clip-icon" aria-hidden="true">◇</span><div>Project notes<small>Pinned text</small></div></div>
+    </div>
+  </section>
+  <section class="features" aria-label="ClipVault features">
+    <div class="feature"><h3>Find earlier clips</h3><p>Search your clipboard history and reuse copied text and images.</p></div>
+    <div class="feature"><h3>Keep important clips</h3><p>Pin items to protect them from automatic cleanup.</p></div>
+    <div class="feature"><h3>Store history locally</h3><p>Your clips are saved on your computer and available when you reopen the app.</p></div>
+  </section>
+  <section class="downloads" id="install">
+    <h2>Install ClipVault</h2>
+    <p>Download the <strong>.deb</strong> package for Linux Mint or try the portable <strong>AppImage</strong>. Both target 64-bit Intel and AMD systems. Check the README for system requirements and desktop compatibility.</p>
+    <div class="actions"><a class="button" href="https://github.com/Amibiplob/ClipVault/releases/latest">Get the latest release</a><a href="https://github.com/Amibiplob/ClipVault#readme">Read the documentation</a></div>
+  </section>
+</main>
+<footer>Built by Md Biplob Hosain · <a href="https://amibiplob.vercel.app">Portfolio</a> · <a href="https://github.com/Amibiplob/ClipVault/issues">Report an issue</a></footer>
+</div>
+</body>
+</html>
