@@ -26,6 +26,7 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="1.2.0" date="2026-11-10"><description><p>Native or custom window controls, installed app fonts, clean Compact and Comfortable layouts, silent login startup, consistent delete confirmation, and an offline changelog. Existing clipboard history and settings are preserved.</p></description></release>
     <release version="1.1.0" date="2026-11-08" />
   </releases>
 </component>

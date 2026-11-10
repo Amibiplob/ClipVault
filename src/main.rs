@@ -1,4 +1,5 @@
 mod clipboard;
+mod fonts;
 mod icons;
 mod shortcut;
 mod storage;
@@ -36,7 +37,7 @@ fn launch() -> Result<(), String> {
             .map(PathBuf::from)
     };
     if args.iter().any(|a| a == "--help") {
-        println!("ClipVault — private native clipboard history\n\n  --toggle              Toggle the running floating window\n  --background          Start with the window hidden\n  --screenshot FILE.png Draw 120 frames, save the window, and exit\n  --data-dir DIRECTORY  Use a separate local history directory\n  --diagnostics         Print desktop capability information\n\nUse Ctrl+V in your target app after selecting a history item.\nWayland: assign clipvault --toggle to Super+V in desktop shortcuts.");
+        println!("ClipVault — private native clipboard history\n\n  --toggle              Toggle the running floating window\n  --background          Start with the window hidden\n  --autostart           Login launch; honor Start hidden\n  --screenshot FILE.png Draw 120 frames, save the window, and exit\n  --data-dir DIRECTORY  Use a separate local history directory\n  --diagnostics         Print desktop capability information\n\nUse Ctrl+V in your target app after selecting a history item.\nWayland: assign clipvault --toggle to Super+V in desktop shortcuts.");
         return Ok(());
     }
     if args.iter().any(|a| a == "--diagnostics") {
@@ -88,6 +89,12 @@ fn launch() -> Result<(), String> {
         if shot.is_some() {
             return Err("This capture data directory is already in use".into());
         }
+        if args
+            .iter()
+            .any(|a| a == "--autostart" || a == "--background")
+        {
+            return Ok(());
+        }
         let mut stream = UnixStream::connect(&socket)
             .map_err(|e| format!("Could not reach the running instance: {e}"))?;
         stream
@@ -116,8 +123,15 @@ fn launch() -> Result<(), String> {
     });
     let store = Arc::new(Mutex::new(storage::Store::open(root)?));
     let service = clipboard::start(store.clone());
-    let hidden = args.iter().any(|a| a == "--background") && shot.is_none();
     let settings = store.lock().unwrap().settings.clone();
+    let hidden = startup_hidden(&args, &settings) && shot.is_none();
+    // eframe 0.31 unconditionally maps the first rendered root window. Do not
+    // initialize it at all during silent startup: monitoring and IPC run alone.
+    let service = if hidden {
+        wait_for_window(service, &ipr)?
+    } else {
+        service
+    };
     let image = image::load_from_memory(include_bytes!("../assets/icons/256x256/clipvault.png"))
         .map_err(|e| e.to_string())?
         .into_rgba8();
@@ -132,9 +146,9 @@ fn launch() -> Result<(), String> {
         .with_inner_size(settings.window_size)
         .with_min_inner_size([440., 420.])
         .with_clamp_size_to_monitor_size(true)
-        .with_decorations(true)
+        .with_decorations(settings.system_title_bar)
         .with_resizable(true)
-        .with_visible(!hidden);
+        .with_visible(true);
     if settings.always_on_top {
         viewport = viewport.with_always_on_top();
     }
@@ -152,7 +166,7 @@ fn launch() -> Result<(), String> {
         options,
         Box::new(move |cc| {
             Ok(Box::new(ui::VaultApp::new(
-                cc, store, service, ipr, shot, hidden,
+                cc, store, service, ipr, shot, false,
             )))
         }),
     )
@@ -160,4 +174,113 @@ fn launch() -> Result<(), String> {
     let _ = fs::remove_file(socket);
     drop(lock);
     r
+}
+
+fn wait_for_window(
+    service: clipboard::Service,
+    ipc: &mpsc::Receiver<String>,
+) -> Result<clipboard::Service, String> {
+    let mut pending = std::collections::VecDeque::new();
+    let mut service_closed = false;
+    loop {
+        match ipc.recv_timeout(std::time::Duration::from_millis(40)) {
+            Ok(message) if matches!(message.as_str(), "show" | "toggle") => break,
+            Err(mpsc::RecvTimeoutError::Disconnected) if service_closed => {
+                return Err("Background services stopped".into())
+            }
+            _ => {}
+        }
+        loop {
+            match service.rx.try_recv() {
+                Ok(clipboard::Notice::Open) => return forward_pending(service, pending),
+                Ok(clipboard::Notice::Changed) => {} // The store is authoritative when opened.
+                Ok(notice) => {
+                    if pending.len() == 64 {
+                        pending.pop_front();
+                    }
+                    pending.push_back(notice);
+                }
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    service_closed = true;
+                    break;
+                }
+            }
+        }
+    }
+    forward_pending(service, pending)
+}
+fn forward_pending(
+    service: clipboard::Service,
+    pending: std::collections::VecDeque<clipboard::Notice>,
+) -> Result<clipboard::Service, String> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        for notice in pending.into_iter().chain(service.rx) {
+            if tx.send(notice).is_err() {
+                break;
+            }
+        }
+    });
+    Ok(clipboard::Service { tx: service.tx, rx })
+}
+fn startup_hidden(args: &[String], settings: &storage::Settings) -> bool {
+    args.iter().any(|a| a == "--background")
+        || (args.iter().any(|a| a == "--autostart") && settings.startup && settings.start_hidden)
+}
+#[cfg(test)]
+mod startup_tests {
+    #[test]
+    fn only_login_launch_honors_start_hidden() {
+        for startup in [false, true] {
+            for hidden in [false, true] {
+                let settings = crate::storage::Settings {
+                    startup,
+                    start_hidden: hidden,
+                    ..Default::default()
+                };
+                assert!(!super::startup_hidden(&[], &settings));
+                assert_eq!(
+                    super::startup_hidden(&["--autostart".into()], &settings),
+                    startup && hidden
+                );
+                assert!(super::startup_hidden(&["--background".into()], &settings));
+            }
+        }
+    }
+    #[test]
+    fn silent_monitor_waits_for_shortcut_or_manual_launch_without_creating_ui() {
+        use crate::clipboard::{Notice, Service};
+        use std::sync::mpsc;
+        for shortcut in [true, false] {
+            let (command, _commands) = mpsc::channel();
+            let (notice, notices) = mpsc::channel();
+            let (ipc, requests) = mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                super::wait_for_window(
+                    Service {
+                        tx: command,
+                        rx: notices,
+                    },
+                    &requests,
+                )
+                .unwrap()
+            });
+            notice.send(Notice::Status("Monitoring".into())).unwrap();
+            assert!(!worker.is_finished());
+            if shortcut {
+                notice.send(Notice::Open).unwrap();
+            } else {
+                ipc.send("show".into()).unwrap();
+            }
+            let service = worker.join().unwrap();
+            assert!(matches!(
+                service
+                    .rx
+                    .recv_timeout(std::time::Duration::from_secs(1))
+                    .unwrap(),
+                Notice::Status(_)
+            ));
+        }
+    }
 }

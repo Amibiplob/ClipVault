@@ -140,8 +140,9 @@ def stage():
         copy(ROOT / f"assets/icons/{size}x{size}/clipvault.png", f"usr/share/icons/hicolor/{size}x{size}/apps/clipvault.png")
     (APPDIR / "clipvault.svg").symlink_to("usr/share/icons/hicolor/scalable/apps/clipvault.svg")
     (APPDIR / ".DirIcon").symlink_to("clipvault.svg")
-    for name in ["LICENSE", "THIRD-PARTY-NOTICES.txt", "README.md", "RELEASE-NOTES.md", "VERIFICATION.md", "ACTIVATION-VERIFICATION.md", "FEATURE-VERIFICATION.md"]:
+    for name in ["LICENSE", "THIRD-PARTY-NOTICES.txt", "README.md", "RELEASE-NOTES.md", "VERIFICATION.md", "ACTIVATION-VERIFICATION.md", "FEATURE-VERIFICATION.md", "V1.2.0-VERIFICATION.md", "CHANGELOG-v1.2.0.txt"]:
         copy(ROOT / name, "usr/share/doc/clipvault/" + name)
+    copy(ROOT / "packaging/linux/io.clipvault.desktop.metainfo.xml", "usr/share/metainfo/io.clipvault.desktop.metainfo.xml")
     copy(ROOT / "packaging/README.md", "usr/share/doc/clipvault/PACKAGING.md")
     copy(ROOT / "packaging/SOFTWARE-MANAGER-VERIFICATION.md", "usr/share/doc/clipvault/SOFTWARE-MANAGER-VERIFICATION.md")
     copy(ROOT / "docs/history.png", "usr/share/doc/clipvault/docs/history.png")

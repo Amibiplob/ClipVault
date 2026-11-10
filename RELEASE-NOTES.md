@@ -1,3 +1,25 @@
+# ClipVault v1.2.0
+
+Native Linux clipboard manager update. Application version **1.2.0**, Debian revision **1.2.0-1**. No installation, tag, publication, or upload is performed by the build scripts.
+
+A cleaner clipboard, with a window that feels at home.
+
+• Choose your desktop’s title bar and borders, or ClipVault’s own movable, resizable window controls.
+• Pick an installed app font, preview it, and return to System default. Missing fonts fall back automatically.
+• Compact keeps a single clean list with small image thumbnails. Comfortable adds one full-content preview, with no repeated title or duplicate text.
+• Scrollbars have a separate lane. Pins use a filled accent icon; unpinned clips use a muted outline.
+• Copy text, Copy image, Pin/Unpin, Edit text, and Delete are available where appropriate.
+• Start hidden at login while monitoring continues. The shortcut or app menu opens the window normally.
+• Confirm before deleting is on by default and applies to menus, previews, and keyboard Delete. Clear history has its own confirmation; automatic cleanup protects pins.
+• This offline changelog appears once per version when you open the window. Reopen it from About → View changelog.
+
+Your existing clipboard history, original image data, pins, shortcuts, and saved preferences are retained.
+
+Desktop limitations: native decorations, focus, placement and resizing are ultimately controlled by the compositor; Wayland still needs supported data-control and a desktop shortcut. Fontconfig supplies installed fonts; absent/invalid fonts fall back safely. See [current verification](V1.2.0-VERIFICATION.md) for actual test/build evidence and unverified physical desktop behaviors.
+
+---
+Historical release notes below describe their original versions only.
+
 # ClipVault v1.1.0
 
 Prepared feature update; no release, tag, push, upload, or system installation performed.

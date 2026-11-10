@@ -45,6 +45,11 @@ pub struct Settings {
     pub exclude_apps: String,
     pub max_mb: usize,
     pub startup: bool,
+    pub start_hidden: bool,
+    pub system_title_bar: bool,
+    pub app_font: String,
+    pub confirm_before_delete: bool,
+    pub changelog_dismissed_version: String,
     pub age_enabled: bool,
     pub count_enabled: bool,
     pub skip_consecutive: bool,
@@ -67,6 +72,11 @@ impl Default for Settings {
             exclude_apps: "keepass\n1password\nbitwarden".into(),
             max_mb: 32,
             startup: false,
+            start_hidden: false,
+            system_title_bar: true,
+            app_font: String::new(),
+            confirm_before_delete: true,
+            changelog_dismissed_version: String::new(),
             age_enabled: true,
             count_enabled: true,
             skip_consecutive: true,
@@ -637,6 +647,67 @@ pub fn file_title(text: &str) -> String {
     }
 }
 
+// Decode the actual saved GIF/WebP image for Comfortable preview. Never replace its payload.
+pub fn native_image(path: &Path) -> Result<image::DynamicImage, image::ImageError> {
+    fn decode(path: &Path) -> Result<image::DynamicImage, String> {
+        unsafe {
+            let lib =
+                libloading::Library::new("libgdk_pixbuf-2.0.so.0").map_err(|e| e.to_string())?;
+            let load: libloading::Symbol<
+                unsafe extern "C" fn(*const c_char, *mut *mut c_void) -> *mut c_void,
+            > = lib
+                .get(b"gdk_pixbuf_new_from_file\0")
+                .map_err(|e| e.to_string())?;
+            let get = |name: &[u8]| -> Result<
+                libloading::Symbol<unsafe extern "C" fn(*mut c_void) -> c_int>,
+                String,
+            > { lib.get(name).map_err(|e| e.to_string()) };
+            let width = get(b"gdk_pixbuf_get_width\0")?;
+            let height = get(b"gdk_pixbuf_get_height\0")?;
+            let stride = get(b"gdk_pixbuf_get_rowstride\0")?;
+            let channels = get(b"gdk_pixbuf_get_n_channels\0")?;
+            let pixels: libloading::Symbol<unsafe extern "C" fn(*mut c_void) -> *mut u8> = lib
+                .get(b"gdk_pixbuf_get_pixels\0")
+                .map_err(|e| e.to_string())?;
+            let unref: libloading::Symbol<unsafe extern "C" fn(*mut c_void)> =
+                lib.get(b"g_object_unref\0").map_err(|e| e.to_string())?;
+            let filename =
+                CString::new(path.as_os_str().as_encoded_bytes()).map_err(|e| e.to_string())?;
+            let pix = load(filename.as_ptr(), std::ptr::null_mut());
+            if pix.is_null() {
+                return Err("Image decoder unavailable".into());
+            }
+            let (w, h, row, n) = (width(pix), height(pix), stride(pix), channels(pix));
+            if w <= 0
+                || h <= 0
+                || (w as u64 * h as u64) > 64_000_000
+                || !(3..=4).contains(&n)
+                || row < w * n
+            {
+                unref(pix);
+                return Err("Image exceeds preview limits".into());
+            }
+            let data = pixels(pix);
+            if data.is_null() {
+                unref(pix);
+                return Err("Image data unavailable".into());
+            }
+            let rgba = image::RgbaImage::from_fn(w as u32, h as u32, |x, y| {
+                let p = data.add(y as usize * row as usize + x as usize * n as usize);
+                image::Rgba([
+                    *p,
+                    *p.add(1),
+                    *p.add(2),
+                    if n == 4 { *p.add(3) } else { 255 },
+                ])
+            });
+            unref(pix);
+            Ok(image::DynamicImage::ImageRgba8(rgba))
+        }
+    }
+    decode(path).map_err(|e| image::ImageError::IoError(std::io::Error::other(e)))
+}
+
 // GdkPixbuf supplies GIF and WebP thumbnail decoding on Linux. Originals stay untouched.
 fn native_thumbnail(input: &Path, output: &Path) -> Result<(), String> {
     unsafe {
@@ -1077,5 +1148,89 @@ mod tests {
             .is_err());
         assert!(s.db.rows("SELECT json FROM settings").unwrap().is_empty());
         fs::remove_dir_all(&s.root).unwrap();
+    }
+    #[test]
+    fn upgrade_from_v110_preserves_all_old_preferences_and_original_payloads() {
+        let mut s = store();
+        s.settings.shortcut = "Ctrl+Alt+V".into();
+        s.settings.light = true;
+        s.settings.compact = false;
+        s.settings.startup = true;
+        s.settings.hide_after_copy = true;
+        s.settings.exclude_apps = "private-editor".into();
+        s.settings.exclude_content = "secret".into();
+        s.settings.updates.automatic = true;
+        s.settings.age_enabled = false;
+        s.settings.count_enabled = false;
+        s.settings.window_size = [980., 710.];
+        s.settings.window_position = Some([42., 73.]);
+        let text = Snapshot::from([
+            ("text/plain".into(), b"preserved text".to_vec()),
+            ("text/html".into(), b"<b>preserved text</b>".to_vec()),
+        ]);
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(37, 19)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        let image = Snapshot::from([("image/png".into(), png.into_inner())]);
+        for data in [&text, &image] {
+            s.ingest(data, "legacy").unwrap();
+        }
+        s.pin(&s.items[0].id.clone()).unwrap();
+        let metadata = serde_json::to_value(&s.items).unwrap();
+        let mut legacy = serde_json::to_value(&s.settings).unwrap();
+        for key in [
+            "start_hidden",
+            "system_title_bar",
+            "app_font",
+            "confirm_before_delete",
+            "changelog_dismissed_version",
+        ] {
+            legacy.as_object_mut().unwrap().remove(key);
+        }
+        s.db.run(&format!(
+            "INSERT OR REPLACE INTO settings VALUES(1,{})",
+            quote(&legacy.to_string())
+        ))
+        .unwrap();
+        let root = s.root.clone();
+        drop(s);
+        let mut upgraded = Store::open(root.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&upgraded.items).unwrap(), metadata);
+        assert_eq!(
+            upgraded
+                .snapshot(upgraded.items.iter().find(|i| i.kind == "Text").unwrap())
+                .unwrap(),
+            text
+        );
+        assert_eq!(
+            upgraded
+                .snapshot(upgraded.items.iter().find(|i| i.kind == "Images").unwrap())
+                .unwrap(),
+            image
+        );
+        let actual = serde_json::to_value(&upgraded.settings).unwrap();
+        for (key, value) in legacy.as_object().unwrap() {
+            assert_eq!(&actual[key], value, "existing setting {key} changed");
+        }
+        assert!(upgraded.settings.confirm_before_delete);
+        assert!(upgraded.settings.system_title_bar);
+        assert!(upgraded.settings.app_font.is_empty());
+        assert!(upgraded.settings.changelog_dismissed_version.is_empty());
+        upgraded.settings.app_font = "Saved font family".into();
+        upgraded.settings.start_hidden = true;
+        upgraded.settings.system_title_bar = false;
+        upgraded.settings.confirm_before_delete = false;
+        upgraded.settings.changelog_dismissed_version = "1.2.0".into();
+        upgraded.save_settings().unwrap();
+        drop(upgraded);
+        let restarted = Store::open(root.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&restarted.items).unwrap(), metadata);
+        assert_eq!(restarted.settings.app_font, "Saved font family");
+        assert!(restarted.settings.start_hidden);
+        assert!(!restarted.settings.system_title_bar);
+        assert!(!restarted.settings.confirm_before_delete);
+        assert_eq!(restarted.settings.changelog_dismissed_version, "1.2.0");
+        fs::remove_dir_all(root).unwrap();
     }
 }

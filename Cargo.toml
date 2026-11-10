@@ -1,6 +1,6 @@
 [package]
 name = "clipvault"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2021"
 description = "Private native Linux clipboard history"
 license = "MIT"
@@ -14,7 +14,7 @@ section = "utils"
 priority = "optional"
 # dlopen() libraries are invisible to cargo-deb's ELF dependency scan.
 depends = "$auto, libc6 (>= 2.39), libsqlite3-0, libgdk-pixbuf-2.0-0, libx11-6, libx11-xcb1, libxcursor1, libxi6, libxrandr2, libxinerama1, libxrender1, libxfixes3, libxext6, libxkbcommon0, libxkbcommon-x11-0, libxcb1, libxcb-render0, libxcb-shape0, libxcb-xfixes0, libwayland-client0, libwayland-cursor0, libwayland-egl1, libgl1, libegl1, xkb-data"
-recommends = "webp-pixbuf-loader"
+recommends = "webp-pixbuf-loader, fontconfig"
 maintainer-scripts = "packaging/linux"
 assets = [
     ["target/release/clipvault", "usr/bin/clipvault", "755"],
@@ -32,6 +32,8 @@ assets = [
     ["LICENSE", "usr/share/doc/clipvault/LICENSE", "644"],
     ["THIRD-PARTY-NOTICES.txt", "usr/share/doc/clipvault/THIRD-PARTY-NOTICES.txt", "644"],
     ["README.md", "usr/share/doc/clipvault/README.md", "644"],
+    ["CHANGELOG-v1.2.0.txt", "usr/share/doc/clipvault/CHANGELOG-v1.2.0.txt", "644"],
+    ["V1.2.0-VERIFICATION.md", "usr/share/doc/clipvault/V1.2.0-VERIFICATION.md", "644"],
     ["RELEASE-NOTES.md", "usr/share/doc/clipvault/RELEASE-NOTES.md", "644"],
     ["VERIFICATION.md", "usr/share/doc/clipvault/VERIFICATION.md", "644"],
     ["FEATURE-VERIFICATION.md", "usr/share/doc/clipvault/FEATURE-VERIFICATION.md", "644"],
@@ -43,6 +45,7 @@ assets = [
 ]
 
 [dependencies]
+ab_glyph = "0.2"
 eframe = { version = "0.31.1", default-features = false, features = ["default_fonts", "glow", "x11", "wayland"] }
 x11rb = { version = "0.13.2", features = ["xfixes", "xtest", "xkb"] }
 serde = { version = "1.0", features = ["derive"] }

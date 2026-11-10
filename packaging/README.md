@@ -1,4 +1,4 @@
-# Linux distribution: ClipVault 1.1.0
+# Linux distribution: ClipVault 1.2.0
 
 The packaging target is **Linux Mint 22.x, x86-64 (amd64)**, based on Ubuntu
 24.04, glibc 2.39. Build on Mint 22.x or Ubuntu 24.04 x86-64; the script rejects
@@ -96,19 +96,19 @@ bash scripts/test-linux-packages.sh --gui
 
 ### 5. Find the finished files
 
-After a successful build, version **1.1.0** saves these files inside the
+After a successful build, version **1.2.0** saves these files inside the
 project's **app/dist/** folder:
 
 ```text
-/home/biplob/Documents/Craft Anything/build-clipvault-a-modern/app/dist/clipvault_1.1.0-1_amd64.deb
-/home/biplob/Documents/Craft Anything/build-clipvault-a-modern/app/dist/ClipVault-1.1.0-x86_64.AppImage
+/home/biplob/Documents/Craft Anything/build-clipvault-a-modern/app/dist/clipvault_1.2.0-1_amd64.deb
+/home/biplob/Documents/Craft Anything/build-clipvault-a-modern/app/dist/ClipVault-1.2.0-x86_64.AppImage
 /home/biplob/Documents/Craft Anything/build-clipvault-a-modern/app/dist/SHA256SUMS
 ```
 
 From the same terminal, list the packages and verify their checksums with:
 
 ```sh
-ls -lh dist/clipvault_1.1.0-1_amd64.deb dist/ClipVault-1.1.0-x86_64.AppImage dist/SHA256SUMS
+ls -lh dist/clipvault_1.2.0-1_amd64.deb dist/ClipVault-1.2.0-x86_64.AppImage dist/SHA256SUMS
 (cd dist && sha256sum --check SHA256SUMS)
 ```
 
@@ -173,7 +173,7 @@ explicit dependencies for SQLite, GdkPixbuf, X11, XCB, Wayland, xkbcommon,
 OpenGL and EGL. Merely using `$auto` would miss `libloading`/dlopen dependencies.
 GIF support is provided by the GdkPixbuf package; WebP's loader is recommended
 for the .deb. Missing optional thumbnail support does not discard original
-clipboard bytes. Install with `sudo apt install ./dist/clipvault_1.1.0-1_amd64.deb`
+clipboard bytes. Install with `sudo apt install ./dist/clipvault_1.2.0-1_amd64.deb`
 so apt resolves dependencies; launch `clipvault` or the desktop menu entry.
 
 The AppDir explicitly stages the libraries in `linux/runtime-libraries.txt`,
@@ -192,7 +192,7 @@ source available alongside the release as required by their included licenses;
 the packaging scripts do not fetch or upload source archives. Extracting an
 AppImage allows users to replace its shared libraries and run `AppRun`.
 
-Run `chmod +x dist/ClipVault-1.1.0-x86_64.AppImage` and launch that file.
+Run `chmod +x dist/ClipVault-1.2.0-x86_64.AppImage` and launch that file.
 If FUSE is unavailable, run it with `--appimage-extract`, then
 `./squashfs-root/AppRun`. Keep the AppImage at a stable location before enabling
 login startup. Startup entries reference the original AppImage rather than
@@ -238,7 +238,7 @@ runtime commit `fedfad5`; original runtime licensing and source links remain
 embedded in the runtime as well. No replacement runtime design or network
 fetch is involved. Only run this helper with a packaging tool you trust.
 
-## Logo and desktop integration in 1.1.0
+## Logo and desktop integration in 1.2.0
 
 Both packages include the unchanged SVG and PNGs at 16, 24, 32, 48, 64, 128,
 256 and 512 pixels under `usr/share/icons/hicolor/*/apps/clipvault.*`.

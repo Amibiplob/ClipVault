@@ -62,6 +62,30 @@ pub fn draw(p: &Painter, r: Rect, name: &str, color: Color32) {
             p.circle_stroke(c, 7. * z, stroke);
             p.circle_stroke(c, 2.5 * z, stroke);
         }
+        "minimize" => {
+            line(&[(5., 16.), (19., 16.)]);
+        }
+        "maximize" => {
+            rect(5., 5., 14., 14., 1.);
+        }
+        "pin-filled" => {
+            p.add(Shape::convex_polygon(
+                [
+                    (8., 3.),
+                    (16., 3.),
+                    (15., 9.),
+                    (18., 13.),
+                    (6., 13.),
+                    (9., 9.),
+                ]
+                .iter()
+                .map(|&(x, y)| point(x, y))
+                .collect(),
+                color,
+                Stroke::NONE,
+            ));
+            line(&[(12., 13.), (12., 21.)]);
+        }
         "pin" => {
             line(&[(8., 3.), (16., 3.)]);
             line(&[

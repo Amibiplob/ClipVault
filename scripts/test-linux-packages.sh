@@ -23,10 +23,12 @@ trap 'rm -rf -- "$work"' EXIT
 check_tree() {
     local tree=$1 launcher=$2 label=$3
     test -x "$tree/usr/bin/clipvault"
-    for file in usr/share/applications/io.clipvault.desktop.desktop usr/share/icons/hicolor/scalable/apps/clipvault.svg usr/share/doc/clipvault/LICENSE usr/share/doc/clipvault/THIRD-PARTY-NOTICES.txt usr/share/doc/clipvault/README.md usr/share/doc/clipvault/PACKAGING.md; do
+    for file in usr/share/applications/io.clipvault.desktop.desktop usr/share/icons/hicolor/scalable/apps/clipvault.svg usr/share/doc/clipvault/LICENSE usr/share/doc/clipvault/THIRD-PARTY-NOTICES.txt usr/share/doc/clipvault/README.md usr/share/doc/clipvault/PACKAGING.md usr/share/doc/clipvault/CHANGELOG-v1.2.0.txt usr/share/doc/clipvault/V1.2.0-VERIFICATION.md usr/share/metainfo/io.clipvault.desktop.metainfo.xml; do
         test -s "$tree/$file"
     done
     desktop-file-validate "$tree/usr/share/applications/io.clipvault.desktop.desktop"
+    cmp "$root/CHANGELOG-v1.2.0.txt" "$tree/usr/share/doc/clipvault/CHANGELOG-v1.2.0.txt"
+    cmp "$root/packaging/linux/io.clipvault.desktop.metainfo.xml" "$tree/usr/share/metainfo/io.clipvault.desktop.metainfo.xml"
     cmp "$root/assets/clipvault.svg" "$tree/usr/share/icons/hicolor/scalable/apps/clipvault.svg"
     rg -q '^Icon=clipvault$' "$tree/usr/share/applications/io.clipvault.desktop.desktop"
     rg -q '^StartupWMClass=clipvault$' "$tree/usr/share/applications/io.clipvault.desktop.desktop"

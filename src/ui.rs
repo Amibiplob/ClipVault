@@ -55,6 +55,11 @@ pub struct VaultApp {
     toast: Option<(String, Instant)>,
     last_cleanup: Instant,
     last_geometry: Instant,
+    installed_fonts: Vec<crate::fonts::InstalledFont>,
+    applied_font: String,
+    font_available: bool,
+    changelog_open: bool,
+    changelog_considered: bool,
 }
 impl VaultApp {
     pub fn new(
@@ -134,17 +139,9 @@ impl VaultApp {
         shot: Option<PathBuf>,
         hidden: bool,
     ) -> Self {
-        let mut fonts = FontDefinitions::default();
-        fonts.font_data.insert(
-            "interface".into(),
-            FontData::from_static(include_bytes!("../assets/Interface.ttf")).into(),
-        );
-        fonts
-            .families
-            .get_mut(&FontFamily::Proportional)
-            .unwrap()
-            .insert(0, "interface".into());
-        ctx.set_fonts(fonts);
+        let installed_fonts = crate::fonts::installed();
+        let applied_font = store.lock().unwrap().settings.app_font.clone();
+        let font_available = crate::fonts::apply(ctx, &applied_font, &installed_fonts);
         let mut style = (*ctx.style()).clone();
         style
             .text_styles
@@ -152,6 +149,7 @@ impl VaultApp {
         style
             .text_styles
             .insert(TextStyle::Button, FontId::proportional(13.));
+        style.spacing.scroll = egui::style::ScrollStyle::solid();
         style.spacing.button_padding = vec2(11., 8.);
         style.spacing.item_spacing = vec2(8., 9.);
         ctx.set_style(style);
@@ -212,6 +210,11 @@ impl VaultApp {
             toast: None,
             last_cleanup: Instant::now(),
             last_geometry: Instant::now(),
+            installed_fonts,
+            applied_font,
+            font_available,
+            changelog_open: false,
+            changelog_considered: false,
         }
     }
     fn handle_notice(&mut self, ctx: &Context, notice: Notice) {
@@ -418,12 +421,22 @@ impl VaultApp {
             self.preview = None;
             return;
         };
-        if item.pinned {
+        if self.store.lock().unwrap().settings.confirm_before_delete {
             self.confirm_delete = Some(item.clone());
         } else {
-            self.mutate(|s| s.delete(&item.id));
+            self.confirm_delete = None;
+            self.delete_confirmed(&item);
+        }
+    }
+    fn delete_confirmed(&mut self, item: &Item) {
+        if self.mutate(|s| s.delete(&item.id)) {
             self.textures.remove(&item.id);
+            self.textures.remove(&format!("full-{}", item.id));
             self.preview = None;
+            if self.selected.as_deref() == Some(&item.id) {
+                self.selected = None;
+            }
+            self.confirm_delete = None;
         }
     }
     fn edit(&mut self, item: &Item) {
@@ -462,6 +475,34 @@ impl VaultApp {
         self.textures.insert(item.id.clone(), tex.clone());
         Some(tex)
     }
+    fn full_image(&mut self, ctx: &Context, item: &Item) -> Option<TextureHandle> {
+        let key = format!("full-{}", item.id);
+        if let Some(t) = self.textures.get(&key) {
+            return Some(t.clone());
+        }
+        let root = self.store.lock().unwrap().root.clone();
+        let path = root.join(
+            &item
+                .formats
+                .iter()
+                .find(|f| f.mime.starts_with("image/"))?
+                .file,
+        );
+        let image = image::open(&path)
+            .or_else(|_| crate::storage::native_image(&path))
+            .ok()?
+            .into_rgba8();
+        let texture = ctx.load_texture(
+            &key,
+            ColorImage::from_rgba_unmultiplied(
+                [image.width() as usize, image.height() as usize],
+                image.as_raw(),
+            ),
+            TextureOptions::LINEAR,
+        );
+        self.textures.insert(key, texture.clone());
+        Some(texture)
+    }
     fn header(&mut self, ui: &mut Ui, ctx: &Context) {
         ui.horizontal(|ui| {
             ui.image((self.logo.id(), vec2(32., 32.)));
@@ -473,8 +514,19 @@ impl VaultApp {
                 ui.label(RichText::new("On this device").small().color(muted(ui)));
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if icons::button(ui, "close", "Hide · Escape", 30., muted(ui)).clicked() {
-                    self.hide(ctx);
+                if !self.store.lock().unwrap().settings.system_title_bar {
+                    if icons::button(ui, "close", "Hide · Escape", 30., muted(ui)).clicked() {
+                        self.hide(ctx);
+                    }
+                    if icons::button(ui, "maximize", "Maximize / Restore", 24., muted(ui)).clicked()
+                    {
+                        ctx.send_viewport_cmd(ViewportCommand::Maximized(
+                            !ctx.input(|i| i.viewport().maximized.unwrap_or(false)),
+                        ));
+                    }
+                    if icons::button(ui, "minimize", "Minimize", 24., muted(ui)).clicked() {
+                        ctx.send_viewport_cmd(ViewportCommand::Minimized(true));
+                    }
                 }
                 let settings_tip = if self.settings_open {
                     "Back to clipboard history"
@@ -538,8 +590,8 @@ impl VaultApp {
             }
         });
     }
-    fn row(&mut self, ui: &mut Ui, ctx: &Context, item: &Item, compact: bool) {
-        let height = if compact { 52. } else { 94. };
+    fn row(&mut self, ui: &mut Ui, ctx: &Context, item: &Item, _compact: bool) {
+        let height = 52.;
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
         let response = ui.interact(rect, Id::new(("clip-row", &item.id)), Sense::click());
         response
@@ -558,6 +610,12 @@ impl VaultApp {
             ui.visuals().panel_fill
         };
         ui.painter().rect_filled(rect, 8, fill);
+        ui.painter().rect_stroke(
+            rect,
+            8,
+            ui.visuals().widgets.noninteractive.bg_stroke,
+            StrokeKind::Inside,
+        );
         if selected || response.has_focus() {
             ui.painter()
                 .rect_stroke(rect, 8, Stroke::new(1_f32, ACCENT), StrokeKind::Inside);
@@ -568,10 +626,7 @@ impl VaultApp {
             "Links" => "link",
             _ => "text",
         };
-        let tile = Rect::from_min_size(
-            rect.min + vec2(10., if compact { 11. } else { 14. }),
-            vec2(30., 30.),
-        );
+        let tile = Rect::from_min_size(rect.min + vec2(10., 11.), vec2(30., 30.));
         ui.painter()
             .rect_filled(tile, 7, ui.visuals().extreme_bg_color);
         if let Some(texture) = self.texture(ctx, item) {
@@ -586,14 +641,11 @@ impl VaultApp {
         } else {
             icons::draw(ui.painter(), tile.shrink(7.), icon, muted(ui));
         }
-        let text_rect = Rect::from_min_max(
-            rect.min + vec2(50., if compact { 17. } else { 11. }),
-            rect.max - vec2(70., 8.),
-        );
+        let text_rect = Rect::from_min_max(rect.min + vec2(50., 17.), rect.max - vec2(84., 8.));
         let title_width = text_rect.width().max(20.);
-        let content = if compact && matches!(item.kind.as_str(), "Text" | "Links") {
+        let content = if matches!(item.kind.as_str(), "Text" | "Links") {
             item.preview.chars().take(240).collect::<String>()
-        } else if compact && item.kind == "Images" && item.thumbnail.is_some() {
+        } else if item.kind == "Images" && item.thumbnail.is_some() {
             String::new()
         } else {
             item.title.clone()
@@ -609,77 +661,30 @@ impl VaultApp {
         let galley = ui.painter().layout_job(job);
         ui.painter()
             .galley(text_rect.min, galley, ui.visuals().text_color());
-        if !compact {
-            let meta = format!(
-                "{} · {}{}",
-                item.kind,
-                relative_time(item.time),
-                if item.pinned { " · Pinned" } else { "" }
-            );
-            let mut job = egui::text::LayoutJob::simple(
-                meta,
-                FontId::proportional(10.),
-                muted(ui),
-                title_width,
-            );
-            job.wrap.max_rows = 1;
-            ui.painter().galley(
-                text_rect.min + vec2(0., 24.),
-                ui.painter().layout_job(job),
-                muted(ui),
-            );
-            let text = item
-                .preview
-                .lines()
-                .nth(1)
-                .unwrap_or("Preview the full content →");
-            let mut job = egui::text::LayoutJob::simple(
-                text.into(),
-                FontId::proportional(11.),
-                muted(ui),
-                title_width,
-            );
-            job.wrap.max_rows = 1;
-            ui.painter().galley(
-                text_rect.min + vec2(0., 48.),
-                ui.painter().layout_job(job),
-                muted(ui),
-            );
-        }
-        // Child controls own their pointer area; they never bubble into activation.
-        if compact && item.pinned {
-            icons::draw(
-                ui.painter(),
-                Rect::from_min_size(pos2(rect.right() - 59., rect.top() + 19.), vec2(14., 14.)),
-                "pin",
-                ACCENT,
-            );
-        }
-        let controls_width = if compact { 28. } else { 58. };
+        let controls_width = 72.;
         let mut child = ui.new_child(
             UiBuilder::new()
                 .id_salt(&item.id)
                 .max_rect(Rect::from_min_size(
                     pos2(rect.right() - controls_width - 6., rect.top() + 10.),
-                    vec2(controls_width, if compact { 32. } else { 45. }),
+                    vec2(controls_width, 32.),
                 ))
                 .layout(Layout::left_to_right(Align::Center)),
         );
         let mut action = 0;
-        if !compact
-            && icons::button(
-                &mut child,
-                "pin",
-                if item.pinned { "Unpin" } else { "Pin" },
-                24.,
-                if item.pinned { ACCENT } else { muted(ui) },
-            )
-            .clicked()
+        if icons::button(
+            &mut child,
+            if item.pinned { "pin-filled" } else { "pin" },
+            if item.pinned { "Unpin" } else { "Pin" },
+            24.,
+            if item.pinned { ACCENT } else { muted(ui) },
+        )
+        .clicked()
         {
             action = 1;
         }
         let menu = child.menu_button("···", |ui| {
-            if ui.button("Copy clip").clicked() {
+            if ui.button(copy_label(item)).clicked() {
                 action = 2;
                 ui.close_menu();
             }
@@ -690,13 +695,7 @@ impl VaultApp {
                 action = 1;
                 ui.close_menu();
             }
-            if !compact && ui.button("Preview").clicked() {
-                action = 3;
-                ui.close_menu();
-            }
-            if matches!(item.kind.as_str(), "Text" | "Links")
-                && ui.button("Edit text as new clip").clicked()
-            {
+            if matches!(item.kind.as_str(), "Text" | "Links") && ui.button("Edit").clicked() {
                 action = 4;
                 ui.close_menu();
             }
@@ -708,18 +707,17 @@ impl VaultApp {
         match action {
             1 => self.pin(item),
             2 => self.activate(item),
-            3 => self.preview = Some(item.clone()),
             4 => self.edit(item),
             5 => self.delete(item),
             _ => {}
         }
         let on_control = ctx
             .pointer_interact_pos()
-            .is_some_and(|p| p.x >= rect.right() - 68.);
+            .is_some_and(|p| p.x >= rect.right() - 80.);
         if response.clicked() && !on_control && action == 0 && !menu.response.clicked() {
             self.activate(item);
         }
-        if response.has_focus() {
+        if response.has_focus() || response.hovered() {
             self.selected = Some(item.id.clone());
         }
         if selected && ctx.input(|i| i.key_pressed(Key::ArrowDown) || i.key_pressed(Key::ArrowUp)) {
@@ -731,34 +729,20 @@ impl VaultApp {
             self.preview = None;
             return;
         }
-        ui.label(
-            RichText::new(format!("PREVIEW · {}", item.kind.to_uppercase()))
-                .small()
-                .color(muted(ui)),
-        );
-        ui.add(Label::new(RichText::new(&item.title).strong().size(16.)).wrap());
-        ui.label(
-            RichText::new(format!(
-                "{} · {}",
-                relative_time(item.time),
-                size_label(item.formats.iter().map(|f| f.size).sum())
-            ))
-            .small()
-            .color(muted(ui)),
-        );
-        ui.add_space(6.);
         ui.horizontal_wrapped(|ui| {
             if ui
                 .add(
-                    Button::new(RichText::new("Copy clip").color(Color32::from_rgb(30, 24, 42)))
-                        .fill(ACCENT),
+                    Button::new(
+                        RichText::new(copy_label(item)).color(Color32::from_rgb(30, 24, 42)),
+                    )
+                    .fill(ACCENT),
                 )
                 .clicked()
             {
                 self.activate(item);
             }
             if ui
-                .button(if item.pinned { "Unpin" } else { "Pin clip" })
+                .button(if item.pinned { "Unpin" } else { "Pin" })
                 .clicked()
             {
                 self.pin(item);
@@ -783,45 +767,31 @@ impl VaultApp {
             .id_salt("full-preview")
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                if let Some(t) = self.texture(ctx, item) {
-                    ui.add(
-                        egui::Image::new(&t)
-                            .max_width(ui.available_width())
-                            .max_height(300.),
-                    );
-                }
-                if item.kind == "Files" {
-                    ui.label("File references only. The original files are not backed up.");
-                }
-                let result = { self.store.lock().unwrap().full_text(item) };
-                match result {
-                    Ok(text) => {
-                        ui.add(
-                            Label::new(RichText::new(text).monospace())
-                                .wrap()
-                                .selectable(true),
+                if item.kind == "Images" {
+                    if let Some(t) = self.full_image(ctx, item) {
+                        ui.add(egui::Image::new(&t).max_width(ui.available_width()));
+                    } else {
+                        ui.label(
+                            "Image preview unavailable. The saved original can still be copied.",
                         );
                     }
-                    Err(e) => {
-                        ui.colored_label(
-                            Color32::LIGHT_RED,
-                            format!("Saved content unavailable: {e}"),
-                        );
+                } else {
+                    if item.kind == "Files" {
+                        ui.label("File references only. The original files are not backed up.");
+                    }
+                    let result = { self.store.lock().unwrap().full_text(item) };
+                    match result {
+                        Ok(text) => {
+                            ui.add(Label::new(text).wrap().selectable(true));
+                        }
+                        Err(e) => {
+                            ui.colored_label(
+                                Color32::LIGHT_RED,
+                                format!("Saved content unavailable: {e}"),
+                            );
+                        }
                     }
                 }
-                ui.add_space(12.);
-                ui.label(
-                    RichText::new(format!(
-                        "Saved formats: {}",
-                        item.formats
-                            .iter()
-                            .map(|f| f.mime.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ))
-                    .small()
-                    .color(muted(ui)),
-                );
             });
     }
     fn editor(&mut self, ui: &mut Ui) {
@@ -920,14 +890,18 @@ impl VaultApp {
         ui.separator();
         let mut s = self.store.lock().unwrap().settings.clone();
         let before = serde_json::to_string(&s).unwrap();
+        let previous_startup = (s.startup, s.start_hidden);
         let mut startup_changed = false;
         ScrollArea::vertical().id_salt("settings-page").auto_shrink([false,false]).show(ui,|ui|{
             ui.set_max_width(ui.available_width());
             match self.settings_tab {
                 0=>{
                     heading(ui,"History that stays useful","Choose what to keep and how ClipVault behaves.");
-                    startup_changed=ui.checkbox(&mut s.startup,"Start at login").changed();
+                    startup_changed=ui.checkbox(&mut s.startup,"Start on login").changed();
+                    ui.add_enabled_ui(s.startup, |ui| { startup_changed |= ui.checkbox(&mut s.start_hidden,"Start hidden").changed(); });
+                    ui.label(RichText::new("Start hidden applies only at login. Opening ClipVault from the app menu always shows the window.").small().color(muted(ui)));
                     ui.label(RichText::new("Monitoring continues when the window is hidden. Copies made while ClipVault is not running cannot be captured.").small().color(muted(ui)));
+                    ui.checkbox(&mut s.confirm_before_delete,"Confirm before deleting");
                     ui.checkbox(&mut s.paused,"Pause clipboard monitoring");
                     ui.checkbox(&mut s.skip_consecutive,"Skip consecutive duplicates");
                     ui.label(RichText::new("Identical content shares one record. When enabled, repeated consecutive copies leave its timestamp unchanged; otherwise recency refreshes.").small().color(muted(ui)));
@@ -948,7 +922,17 @@ impl VaultApp {
                     ui.horizontal(|ui|{ui.selectable_value(&mut s.light,false,"Dark");ui.selectable_value(&mut s.light,true,"Light");});
                     ui.add_space(12.);
                     ui.horizontal(|ui|{ui.selectable_value(&mut s.compact,true,"Compact");ui.selectable_value(&mut s.compact,false,"Comfortable");});
-                    ui.label(RichText::new("Compact shows just the clip content. Comfortable shows the full layout with previews and details.").small().color(muted(ui)));
+                    ui.label(RichText::new("Compact shows just the clip content. Comfortable adds one full-content preview on the right.").small().color(muted(ui)));
+                    ui.checkbox(&mut s.system_title_bar,"Use system title bar and borders");
+                    ui.label(RichText::new("The desktop provides native decorations when supported. Some Wayland compositors choose their own decoration style. With ClipVault controls, drag the app name and resize from any edge.").small().color(muted(ui)));
+                    ui.add_space(8.);
+                    ui.label("App font");
+                    ComboBox::from_id_salt("app-font").selected_text(if s.app_font.is_empty() { "System default" } else { &s.app_font }).width(220.).show_ui(ui, |ui| {
+                        ui.selectable_value(&mut s.app_font, String::new(), "System default");
+                        for font in &self.installed_fonts { ui.selectable_value(&mut s.app_font, font.family.clone(), &font.family); }
+                    });
+                    ui.label("The quick brown fox jumps over the lazy dog. Aa 0123456789");
+                    if !self.font_available { ui.label("Saved font unavailable. Using System default until it is installed again."); }
                     ui.checkbox(&mut s.always_on_top,"Always on top");
                     ui.label("Resize from the window border. Size and position are saved while running; Wayland controls window placement.");
                 }
@@ -976,7 +960,7 @@ impl VaultApp {
         if startup_changed {
             let root = self.store.lock().unwrap().root.clone();
             if let Err(e) = set_startup(s.startup, &root) {
-                s.startup = !s.startup;
+                (s.startup, s.start_hidden) = previous_startup;
                 self.error = Some(e);
             }
         }
@@ -1042,7 +1026,10 @@ impl VaultApp {
                     (vec!["Enter"], "Copy the selected clip"),
                     (vec!["Ctrl", "F"], "Focus search"),
                     (vec!["Ctrl", "Shift", "P"], "Pin or unpin the selected clip"),
-                    (vec!["Delete"], "Delete selected clip; pins ask first"),
+                    (
+                        vec!["Delete"],
+                        "Delete selected clip; follows confirmation setting",
+                    ),
                     (vec!["Escape"], "Cancel, go back, or hide history"),
                     (vec!["Tab"], "Move between controls"),
                 ] {
@@ -1168,6 +1155,9 @@ impl VaultApp {
             "about section rect {:?}",
             ui.min_rect()
         );
+        if ui.button("View changelog").clicked() {
+            self.changelog_open = true;
+        }
         ui.add_space(14.);
         ui.separator();
         ui.add_space(12.);
@@ -1310,25 +1300,22 @@ impl VaultApp {
             });
         }
         if let Some(item) = self.confirm_delete.clone() {
-            Window::new("Delete pinned clip?")
+            Window::new("Delete this clip?")
                 .collapsible(false)
                 .resizable(false)
                 .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
                 .show(ctx, |ui| {
                     ui.set_max_width(330.);
                     ui.label(format!(
-                        "Permanently delete the pinned clip “{}”?",
+                        "Permanently delete “{}”? This cannot be undone.",
                         item.title
                     ));
                     ui.horizontal(|ui| {
                         if ui.button("Cancel").clicked() {
                             self.confirm_delete = None;
                         }
-                        if ui.button("Delete pinned clip").clicked() {
-                            self.mutate(|s| s.delete(&item.id));
-                            self.confirm_delete = None;
-                            self.preview = None;
-                            self.textures.remove(&item.id);
+                        if ui.button("Delete").clicked() {
+                            self.delete_confirmed(&item);
                         }
                     });
                 });
@@ -1341,6 +1328,63 @@ impl VaultApp {
                     if ui.button("Apply and delete").clicked(){self.apply_settings(s);self.pending_settings=None;self.preview=None;}});
             });
         }
+    }
+    fn consider_changelog(&mut self) {
+        if !self.hidden && !self.changelog_considered && self.shot.is_none() {
+            self.changelog_considered = true;
+            self.changelog_open = self
+                .store
+                .lock()
+                .unwrap()
+                .settings
+                .changelog_dismissed_version
+                != env!("CARGO_PKG_VERSION");
+        }
+    }
+    fn dismiss_changelog(&mut self) {
+        if self.mutate(|s| {
+            s.settings.changelog_dismissed_version = env!("CARGO_PKG_VERSION").into();
+            s.save_settings()
+        }) {
+            self.changelog_open = false;
+        }
+    }
+    fn changelog(&mut self, ctx: &Context) {
+        if !self.changelog_open {
+            return;
+        }
+        egui::Modal::new(Id::new("changelog")).show(ctx, |ui| {
+            ui.set_width((ctx.screen_rect().width() - 80.).min(520.));
+            ui.heading(format!(
+                "What’s New in ClipVault v{}",
+                env!("CARGO_PKG_VERSION")
+            ));
+            ScrollArea::vertical()
+                .max_height((ctx.screen_rect().height() - 180.).max(100.))
+                .show(ui, |ui| {
+                    ui.add(Label::new(include_str!("../CHANGELOG-v1.2.0.txt")).wrap());
+                });
+            if ui.button("Done").clicked() {
+                self.dismiss_changelog();
+            }
+        });
+    }
+    fn history_list(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &Context,
+        items: &[Item],
+    ) -> scroll_area::ScrollAreaOutput<()> {
+        ScrollArea::vertical()
+            .id_salt("history")
+            .scroll_bar_visibility(scroll_area::ScrollBarVisibility::AlwaysVisible)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for item in items {
+                    self.row(ui, ctx, item, true);
+                    ui.add_space(4.);
+                }
+            })
     }
     fn render(&mut self, ctx: &Context) {
         if let Some(item) = &self.preview {
@@ -1355,7 +1399,15 @@ impl VaultApp {
             };
             self.preview = current;
         }
+        self.consider_changelog();
         let settings = self.store.lock().unwrap().settings.clone();
+        if settings.app_font != self.applied_font {
+            self.font_available =
+                crate::fonts::apply(ctx, &settings.app_font, &self.installed_fonts);
+            self.applied_font = settings.app_font.clone();
+        }
+        ctx.send_viewport_cmd(ViewportCommand::Decorations(settings.system_title_bar));
+        ctx.style_mut(|s| s.spacing.scroll = egui::style::ScrollStyle::solid());
         if settings.compact {
             self.preview = None;
         }
@@ -1427,8 +1479,10 @@ impl VaultApp {
             .position(|item| self.selected.as_deref() == Some(&item.id))
             .unwrap_or(0);
         self.selected = items.get(selected_index).map(|item| item.id.clone());
-        let modal =
-            self.confirm_clear || self.confirm_delete.is_some() || self.pending_settings.is_some();
+        let modal = self.confirm_clear
+            || self.confirm_delete.is_some()
+            || self.pending_settings.is_some()
+            || self.changelog_open;
         if !self.shortcut_recording
             && !self.shortcut_pending
             && !modal
@@ -1470,7 +1524,9 @@ impl VaultApp {
             && !self.shortcut_pending
             && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape))
         {
-            if modal {
+            if self.changelog_open {
+                self.dismiss_changelog();
+            } else if modal {
                 self.confirm_clear = false;
                 self.confirm_delete = None;
                 self.pending_settings = None;
@@ -1537,25 +1593,23 @@ impl VaultApp {
                 if items.is_empty(){
                     ui.add_space(55.);ui.vertical_centered(|ui|{ui.image((self.logo.id(),vec2(66.,66.)));ui.heading(if query.is_empty(){"Your clipboard, remembered."}else{"No matching clips"});ui.label("Copy text, an image, or a file reference while monitoring is enabled.");ui.label(RichText::new(&self.status).small().color(muted(ui)));});return;
                 }
-                let wide=!settings.compact && ui.available_width()>=670.;
-                if wide{
-                    let width=ui.available_width();
-                    ui.columns(2,|cols|{
-                        cols[0].set_width(width*0.5-8.);
-                        ScrollArea::vertical().id_salt("history").auto_shrink([false,false]).show(&mut cols[0],|ui|{for item in &items{self.row(ui,ctx,item,settings.compact);ui.add_space(4.);}});
-                        if let Some(item)=items.get(selected_index){self.detail(&mut cols[1],ctx,item,false);}
+                if !settings.compact {
+                    ui.columns(2, |cols| {
+                        self.history_list(&mut cols[0], ctx, &items);
+                        if let Some(item) = items.iter().find(|i| self.selected.as_deref() == Some(&i.id)) {
+                            self.detail(&mut cols[1],ctx,item,false);
+                        }
                     });
-                }else{
-                    if !settings.compact { if let Some(item)=items.get(selected_index){ui.horizontal_wrapped(|ui|{
-                        if ui.button("Preview").clicked(){self.preview=Some(item.clone());}
-                        if matches!(item.kind.as_str(),"Text"|"Links")&&ui.button("Edit").clicked(){self.edit(item);}
-                        if ui.button("Copy").clicked(){self.activate(item);}
-                    });} }
-                    ScrollArea::vertical().id_salt("history").auto_shrink([false,false]).show(ui,|ui|{for item in &items{self.row(ui,ctx,item,settings.compact);ui.add_space(4.);}});
+                } else {
+                    self.history_list(ui, ctx, &items);
                 }
             });
         });
         self.dialogs(ctx);
+        self.changelog(ctx);
+        if !settings.system_title_bar {
+            custom_resize(ctx);
+        }
     }
 }
 impl eframe::App for VaultApp {
@@ -1767,23 +1821,72 @@ fn heading(ui: &mut Ui, title: &str, subtitle: &str) {
     ui.label(RichText::new(subtitle).small().color(muted(ui)));
     ui.add_space(12.);
 }
-fn size_label(n: usize) -> String {
-    if n >= 1048576 {
-        format!("{:.1} MB", n as f64 / 1048576.)
-    } else {
-        format!("{} KB", n.div_ceil(1024))
+fn copy_label(item: &Item) -> &'static str {
+    match item.kind.as_str() {
+        "Text" | "Links" => "Copy text",
+        "Images" => "Copy image",
+        _ => "Copy",
     }
 }
-fn relative_time(t: i64) -> String {
-    let d = (now() - t).max(0);
-    if d < 60 {
-        "Just now".into()
-    } else if d < 3600 {
-        format!("{} min ago", d / 60)
-    } else if d < 86400 {
-        format!("{} h ago", d / 3600)
-    } else {
-        format!("{} d ago", d / 86400)
+fn custom_resize(ctx: &Context) {
+    let r = ctx.screen_rect();
+    let e = 6.;
+    use egui::ResizeDirection::*;
+    for (direction, rect, cursor) in [
+        (
+            NorthWest,
+            Rect::from_min_size(r.min, vec2(e, e)),
+            CursorIcon::ResizeNwSe,
+        ),
+        (
+            NorthEast,
+            Rect::from_min_size(pos2(r.right() - e, r.top()), vec2(e, e)),
+            CursorIcon::ResizeNeSw,
+        ),
+        (
+            SouthWest,
+            Rect::from_min_size(pos2(r.left(), r.bottom() - e), vec2(e, e)),
+            CursorIcon::ResizeNeSw,
+        ),
+        (
+            SouthEast,
+            Rect::from_min_size(r.max - vec2(e, e), vec2(e, e)),
+            CursorIcon::ResizeNwSe,
+        ),
+        (
+            North,
+            Rect::from_min_max(r.min + vec2(e, 0.), pos2(r.right() - e, r.top() + e)),
+            CursorIcon::ResizeVertical,
+        ),
+        (
+            South,
+            Rect::from_min_max(pos2(r.left() + e, r.bottom() - e), r.max - vec2(e, 0.)),
+            CursorIcon::ResizeVertical,
+        ),
+        (
+            West,
+            Rect::from_min_max(r.min + vec2(0., e), pos2(r.left() + e, r.bottom() - e)),
+            CursorIcon::ResizeHorizontal,
+        ),
+        (
+            East,
+            Rect::from_min_max(pos2(r.right() - e, r.top() + e), r.max - vec2(0., e)),
+            CursorIcon::ResizeHorizontal,
+        ),
+    ] {
+        Area::new(Id::new(("resize", format!("{direction:?}"))))
+            .movable(false)
+            .constrain(false)
+            .default_size(rect.size())
+            .order(Order::Foreground)
+            .fixed_pos(rect.min)
+            .show(ctx, |ui| {
+                let (_, response) = ui.allocate_exact_size(rect.size(), Sense::drag());
+                let response = response.on_hover_cursor(cursor);
+                if response.drag_started() {
+                    ctx.send_viewport_cmd(ViewportCommand::BeginResize(direction));
+                }
+            });
     }
 }
 fn set_startup(enabled: bool, root: &std::path::Path) -> Result<(), String> {
@@ -1827,7 +1930,7 @@ fn set_startup(enabled: bool, root: &std::path::Path) -> Result<(), String> {
             .replace('%', "%%")
     };
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let text=format!("[Desktop Entry]\nType=Application\nName=ClipVault\nComment=Private clipboard history\nExec=\"{}\" --background --data-dir \"{}\"\nIcon=clipvault\nStartupWMClass=clipvault\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",escape(&exe.to_string_lossy()),escape(&root.to_string_lossy()));
+    let text=format!("[Desktop Entry]\nType=Application\nName=ClipVault\nComment=Private clipboard history\nExec=\"{}\" --autostart --data-dir \"{}\"\nIcon=clipvault\nStartupWMClass=clipvault\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",escape(&exe.to_string_lossy()),escape(&root.to_string_lossy()));
     let temp = file.with_extension("desktop.tmp");
     std::fs::write(&temp, text)
         .and_then(|_| std::fs::rename(temp, file))
@@ -1846,6 +1949,8 @@ mod tests {
             chrono::Utc::now().timestamp_nanos_opt().unwrap()
         ));
         let mut s = Store::open(root.clone()).unwrap();
+        s.settings.changelog_dismissed_version = env!("CARGO_PKG_VERSION").into();
+        s.save_settings().unwrap();
         s.ingest(
             &Snapshot::from([(
                 "text/plain".into(),
@@ -1963,7 +2068,7 @@ mod tests {
                     |ctx| app.render(ctx),
                 );
             }
-            text_position(&output, "Compact shows just the clip content. Comfortable shows the full layout with previews and details.");
+            text_position(&output, "Compact shows just the clip content. Comfortable adds one full-content preview on the right.");
             click_at(&ctx, text_position(&output, label), |ctx| app.render(ctx));
             let restored = Store::open(root.clone()).unwrap();
             assert_eq!(restored.settings.compact, compact);
@@ -1983,7 +2088,7 @@ mod tests {
     fn compact_menu_keeps_pin_edit_and_protected_delete_accessible() {
         let (mut app, rx, root) = app();
         let ctx = Context::default();
-        for action in ["Pin", "Edit text as new clip", "Delete"] {
+        for action in ["Pin", "Edit", "Delete"] {
             let item = app.store.lock().unwrap().items[0].clone();
             let render = |app: &mut VaultApp, ctx: &Context| {
                 CentralPanel::default().show(ctx, |ui| app.row(ui, ctx, &item, true));
@@ -2019,7 +2124,7 @@ mod tests {
             });
             match action {
                 "Pin" => assert!(app.store.lock().unwrap().items[0].pinned),
-                "Edit text as new clip" => {
+                "Edit" => {
                     assert_eq!(
                         app.editor.as_ref().unwrap().1,
                         "Saved text\nFull text content"
@@ -2099,9 +2204,12 @@ mod tests {
                                 || t.contains("Saved formats:")
                                 || t.contains("Just now")
                                 || t.contains("Copied image")));
-                        } else if width == 820 {
-                            assert!(labels.iter().any(|t| t.contains("PREVIEW")));
-                            assert!(labels.iter().any(|t| t.contains("Saved formats:")));
+                        } else {
+                            assert!(labels.contains(&"Copy text"));
+                            assert!(labels.contains(&"Saved text\nFull text content"));
+                            assert!(!labels
+                                .iter()
+                                .any(|t| t.contains("PREVIEW") || t.contains("Saved formats:")));
                         }
                         assert!(
                             app.textures.contains_key(&image.id),
@@ -2349,6 +2457,7 @@ mod tests {
         let (mut app, rx, root) = app();
         let ctx = Context::default();
         let item = app.store.lock().unwrap().items[0].clone();
+        app.store.lock().unwrap().settings.system_title_bar = false;
         app.preview = Some(item.clone());
         app.editor = Some((item, "draft".into()));
         for expected in [true, false] {
@@ -2359,7 +2468,7 @@ mod tests {
                     ..Default::default()
                 };
                 if let Some(pressed) = pressed {
-                    let pos = pos2(379., 24.);
+                    let pos = pos2(315., 24.);
                     input.events = vec![
                         Event::PointerMoved(pos),
                         Event::PointerButton {
@@ -2417,7 +2526,7 @@ mod tests {
             };
             app.store.lock().unwrap().settings.hide_after_copy = true;
             app.store.lock().unwrap().settings.compact = false;
-            click_row(&mut app, &ctx, &item, pos2(380., 35.));
+            click_row(&mut app, &ctx, &item, pos2(366., 35.));
             assert!(
                 app.store
                     .lock()
@@ -2440,6 +2549,7 @@ mod tests {
             assert!(!app.hidden);
             assert!(rx.try_recv().is_err());
             app.pin(&item);
+            app.store.lock().unwrap().settings.confirm_before_delete = false;
             app.delete(&item);
             assert!(app
                 .store
@@ -2700,6 +2810,386 @@ mod tests {
             "Enter on an action must not restore a clip"
         );
         assert!(!app.hidden);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    fn frame(app: &mut VaultApp, ctx: &Context) -> FullOutput {
+        ctx.run(
+            RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(820., 620.))),
+                ..Default::default()
+            },
+            |ctx| app.render(ctx),
+        )
+    }
+    #[test]
+    fn v120_delete_confirmation_menu_preview_and_keyboard_on_and_off() {
+        for confirm in [true, false] {
+            for pinned in [true, false] {
+                for source in ["menu", "preview", "keyboard"] {
+                    let (mut app, rx, root) = app();
+                    let ctx = Context::default();
+                    let item = {
+                        let mut store = app.store.lock().unwrap();
+                        store.settings.confirm_before_delete = confirm;
+                        store.settings.compact = false;
+                        let id = store.items[0].id.clone();
+                        if pinned {
+                            store.pin(&id).unwrap();
+                        }
+                        store.items[0].clone()
+                    };
+                    frame(&mut app, &ctx);
+                    match source {
+                        "menu" => {
+                            let render = |app: &mut VaultApp, ctx: &Context| {
+                                CentralPanel::default()
+                                    .show(ctx, |ui| app.row(ui, ctx, &item, true));
+                            };
+                            let output = ctx.run(RawInput::default(), |ctx| render(&mut app, ctx));
+                            click_at(&ctx, text_position(&output, "···"), |ctx| {
+                                render(&mut app, ctx)
+                            });
+                            let output = ctx.run(RawInput::default(), |ctx| render(&mut app, ctx));
+                            click_at(&ctx, text_position(&output, "Delete"), |ctx| {
+                                render(&mut app, ctx)
+                            });
+                        }
+                        "preview" => {
+                            let output = ctx.run(RawInput::default(), |ctx| {
+                                CentralPanel::default()
+                                    .show(ctx, |ui| app.detail(ui, ctx, &item, false));
+                            });
+                            click_at(&ctx, text_position(&output, "Delete"), |ctx| {
+                                CentralPanel::default()
+                                    .show(ctx, |ui| app.detail(ui, ctx, &item, false));
+                            });
+                        }
+                        _ => {
+                            ctx.memory_mut(|m| m.surrender_focus(Id::new("search")));
+                            let _ = ctx.run(
+                                RawInput {
+                                    events: vec![Event::Key {
+                                        key: Key::Delete,
+                                        physical_key: None,
+                                        pressed: true,
+                                        repeat: false,
+                                        modifiers: Modifiers::NONE,
+                                    }],
+                                    ..Default::default()
+                                },
+                                |ctx| app.render(ctx),
+                            );
+                        }
+                    }
+                    assert_eq!(
+                        app.confirm_delete.is_some(),
+                        confirm,
+                        "source={source} pinned={pinned}"
+                    );
+                    assert_eq!(app.store.lock().unwrap().items.len(), usize::from(confirm));
+                    if confirm {
+                        let mut output = frame(&mut app, &ctx);
+                        for _ in 0..2 {
+                            output = frame(&mut app, &ctx);
+                        }
+                        text_position(&output, "Delete this clip?");
+                        click_at(&ctx, text_position(&output, "Cancel"), |ctx| {
+                            app.render(ctx)
+                        });
+                        assert!(app.confirm_delete.is_none());
+                        assert_eq!(app.store.lock().unwrap().items.len(), 1);
+                        app.delete(&item);
+                        let output = frame(&mut app, &ctx);
+                        let delete = output
+                            .shapes
+                            .iter()
+                            .filter_map(|s| match &s.shape {
+                                Shape::Text(t) if t.galley.job.text == "Delete" => {
+                                    Some(t.pos + t.galley.size() * 0.5)
+                                }
+                                _ => None,
+                            })
+                            .next_back()
+                            .unwrap();
+                        click_at(&ctx, delete, |ctx| app.render(ctx));
+                        assert!(app.confirm_delete.is_none());
+                        assert!(app.store.lock().unwrap().items.is_empty());
+                    }
+                    assert!(rx.try_recv().is_err());
+                    std::fs::remove_dir_all(root).unwrap();
+                }
+            }
+        }
+    }
+    #[test]
+    fn v120_changelog_waits_for_first_open_dismisses_persistently_and_reopens_in_about() {
+        let (mut app, rx, root) = app();
+        let ctx = Context::default();
+        app.store
+            .lock()
+            .unwrap()
+            .settings
+            .changelog_dismissed_version = "1.1.0".into();
+        app.hidden = true;
+        frame(&mut app, &ctx);
+        assert!(!app.changelog_open && !app.changelog_considered);
+        app.handle_notice(&ctx, Notice::Open);
+        frame(&mut app, &ctx);
+        assert!(app.changelog_open);
+        let output = frame(&mut app, &ctx);
+        text_position(&output, "What’s New in ClipVault v1.2.0");
+        let output = frame(&mut app, &ctx);
+        click_at(&ctx, text_position(&output, "Done"), |ctx| app.render(ctx));
+        assert!(!app.changelog_open);
+        let store = Store::open(root.clone()).unwrap();
+        assert_eq!(store.settings.changelog_dismissed_version, "1.2.0");
+        app.changelog_considered = false;
+        frame(&mut app, &ctx);
+        assert!(!app.changelog_open);
+        app.settings_open = true;
+        app.settings_tab = 4;
+        let mut output = frame(&mut app, &ctx);
+        for _ in 0..2 {
+            output = frame(&mut app, &ctx);
+        }
+        click_at(&ctx, text_position(&output, "View changelog"), |ctx| {
+            app.render(ctx)
+        });
+        assert!(app.changelog_open);
+        app.dismiss_changelog();
+        app.settings_open = false;
+        app.changelog_considered = false;
+        app.store
+            .lock()
+            .unwrap()
+            .settings
+            .changelog_dismissed_version = "1.0.0".into();
+        frame(&mut app, &ctx);
+        assert!(app.changelog_open, "another upgrade should show it again");
+        assert!(rx.try_recv().is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn v120_preview_copy_labels_dispatch_original_text_and_image_and_render_full_image() {
+        let (mut app, rx, root) = app();
+        let ctx = Context::default();
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(1200, 700)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        app.store
+            .lock()
+            .unwrap()
+            .ingest(
+                &Snapshot::from([("image/png".into(), png.into_inner())]),
+                "test",
+            )
+            .unwrap();
+        let items = app.store.lock().unwrap().items.clone();
+        for item in items {
+            let render = |app: &mut VaultApp, ctx: &Context| {
+                CentralPanel::default().show(ctx, |ui| app.detail(ui, ctx, &item, false));
+            };
+            let output = ctx.run(RawInput::default(), |ctx| render(&mut app, ctx));
+            let labels: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    Shape::Text(t) => Some(t.galley.job.text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                !labels.contains(&item.title.as_str()),
+                "no repeated preview title"
+            );
+            if item.kind == "Images" {
+                assert_eq!(
+                    app.textures[&format!("full-{}", item.id)].size(),
+                    [1200, 700]
+                );
+                assert!(!labels.contains(&"Edit"));
+            } else {
+                assert_eq!(
+                    labels
+                        .iter()
+                        .filter(|&&s| s == "Saved text\nFull text content")
+                        .count(),
+                    1
+                );
+                assert!(labels.contains(&"Edit"));
+            }
+            click_at(&ctx, text_position(&output, copy_label(&item)), |ctx| {
+                render(&mut app, ctx)
+            });
+            let Command::Restore(id, data) = rx.try_recv().unwrap() else {
+                panic!("copy must restore")
+            };
+            assert_eq!(id, item.id);
+            assert_eq!(data, app.store.lock().unwrap().snapshot(&item).unwrap());
+            app.pending_activation = None;
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn v120_scrollbar_lane_is_outside_menu_buttons_at_all_widths() {
+        let (mut app, _rx, root) = app();
+        let mut items = vec![app.store.lock().unwrap().items[0].clone(); 40];
+        for (n, item) in items.iter_mut().enumerate() {
+            item.id = format!("layout-{n}");
+            item.pinned = n % 2 == 0;
+        }
+        for width in [440., 820., 1200.] {
+            for compact in [true, false] {
+                let ctx = Context::default();
+                ctx.style_mut(|s| {
+                    s.spacing.scroll = egui::style::ScrollStyle::solid();
+                    s.spacing.button_padding = vec2(11., 8.);
+                });
+                let mut inner = Rect::NOTHING;
+                let mut outer = Rect::NOTHING;
+                for _ in 0..3 {
+                    let output = ctx.run(
+                        RawInput {
+                            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 420.))),
+                            ..Default::default()
+                        },
+                        |ctx| {
+                            CentralPanel::default().show(ctx, |ui| {
+                                if !compact {
+                                    ui.set_width((width - 36.) / 2. - 8.);
+                                }
+                                outer = ui.available_rect_before_wrap();
+                                let output = app.history_list(ui, ctx, &items);
+                                inner = output.inner_rect;
+                                assert!(output.content_size.y > output.inner_rect.height());
+                            });
+                        },
+                    );
+                    let menus: Vec<_> = output
+                        .shapes
+                        .iter()
+                        .filter_map(|s| match &s.shape {
+                            Shape::Text(t) if t.galley.job.text == "···" => {
+                                Some((t.pos.x, t.galley.size().x))
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    assert!(!menus.is_empty());
+                    for (x, w) in menus {
+                        assert!(x+w+11.<=inner.right(),"button must fit content rect: width={width} compact={compact} x={x} w={w} inner={inner:?}");
+                    }
+                    assert!(
+                        outer.right() - inner.right() >= ctx.style().spacing.scroll.bar_width,
+                        "scrollbar must reserve its own lane"
+                    );
+                }
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn v120_title_bar_commands_and_font_choice_persist() {
+        let (mut app, _rx, root) = app();
+        let ctx = Context::default();
+        for native in [false, true] {
+            app.store.lock().unwrap().settings.system_title_bar = native;
+            let output = frame(&mut app, &ctx);
+            assert!(output.viewport_output[&ViewportId::ROOT]
+                .commands
+                .contains(&ViewportCommand::Decorations(native)));
+        }
+        let font = app
+            .installed_fonts
+            .first()
+            .map(|f| f.family.clone())
+            .unwrap_or_default();
+        app.mutate(|s| {
+            s.settings.app_font = font.clone();
+            s.settings.system_title_bar = false;
+            s.settings.start_hidden = true;
+            s.settings.confirm_before_delete = false;
+            s.save_settings()
+        });
+        frame(&mut app, &ctx);
+        assert_eq!(app.applied_font, font);
+        let restored = Store::open(root.clone()).unwrap();
+        assert_eq!(restored.settings.app_font, font);
+        assert!(!restored.settings.system_title_bar);
+        assert!(restored.settings.start_hidden);
+        assert!(!restored.settings.confirm_before_delete);
+        app.store.lock().unwrap().settings.app_font = "Unavailable family".into();
+        frame(&mut app, &ctx);
+        assert!(!app.font_available);
+        app.store.lock().unwrap().settings.app_font.clear();
+        frame(&mut app, &ctx);
+        assert!(app.font_available);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn v120_custom_resize_edges_send_compositor_resize_requests() {
+        let ctx = Context::default();
+        let input = |events| RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(820., 620.))),
+            events,
+            ..Default::default()
+        };
+        for _ in 0..3 {
+            let _ = ctx.run(input(vec![]), custom_resize);
+        }
+        let start = pos2(3., 150.);
+        let press = ctx.run(
+            input(vec![
+                Event::PointerMoved(start),
+                Event::PointerButton {
+                    pos: start,
+                    button: PointerButton::Primary,
+                    pressed: true,
+                    modifiers: Modifiers::NONE,
+                },
+            ]),
+            custom_resize,
+        );
+        let output = ctx.run(
+            input(vec![Event::PointerMoved(start + vec2(12., 0.))]),
+            custom_resize,
+        );
+        assert!([press, output]
+            .iter()
+            .any(|output| output.viewport_output[&ViewportId::ROOT]
+                .commands
+                .contains(&ViewportCommand::BeginResize(egui::ResizeDirection::West))));
+    }
+    #[test]
+    fn v120_pin_states_differ_in_shape_and_color_and_clear_still_confirms() {
+        let (mut app, rx, root) = app();
+        let ctx = Context::default();
+        let mut item = app.store.lock().unwrap().items[0].clone();
+        let draw = |app: &mut VaultApp, ctx: &Context, item: &Item| {
+            ctx.run(RawInput::default(), |ctx| {
+                CentralPanel::default().show(ctx, |ui| app.row(ui, ctx, item, true));
+            })
+        };
+        let outline = draw(&mut app, &ctx, &item);
+        item.pinned = true;
+        let filled = draw(&mut app, &ctx, &item);
+        let accent_paths = |o: &FullOutput| {
+            o.shapes
+                .iter()
+                .filter(|s| matches!(&s.shape,Shape::Path(p) if p.fill==ACCENT))
+                .count()
+        };
+        assert_eq!(accent_paths(&outline), 0);
+        assert_eq!(accent_paths(&filled), 1);
+        app.store.lock().unwrap().settings.confirm_before_delete = false;
+        let output = frame(&mut app, &ctx);
+        click_at(&ctx, text_position(&output, "Clear…"), |ctx| {
+            app.render(ctx)
+        });
+        assert!(app.confirm_clear);
+        assert_eq!(app.store.lock().unwrap().items.len(), 1);
+        assert!(rx.try_recv().is_err());
         std::fs::remove_dir_all(root).unwrap();
     }
 }
