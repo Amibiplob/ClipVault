@@ -19,6 +19,8 @@ fn muted(ui: &Ui) -> Color32 {
     }
 }
 
+type ListCache = ((u64, usize, String, String), std::sync::Arc<Vec<Item>>);
+
 pub struct VaultApp {
     store: Shared,
     service: Service,
@@ -45,7 +47,9 @@ pub struct VaultApp {
     textures: HashMap<String, TextureHandle>,
     logo: TextureHandle,
     focus_search: bool,
+    scroll_to_selected: bool,
     shortcut_recording: bool,
+    local_recorder: crate::shortcut::Recorder,
     shortcut_pending: bool,
     shortcut_display: String,
     active_shortcut: Option<String>,
@@ -54,6 +58,15 @@ pub struct VaultApp {
     update_outcome: Option<crate::updates::Outcome>,
     toast: Option<(String, Instant)>,
     last_cleanup: Instant,
+    automatic_activation: bool,
+    desktop_shortcut: Option<String>,
+    restart_updates: Option<Receiver<String>>,
+    replacement: Option<String>,
+    image_result: Option<Receiver<(String, Result<ColorImage, String>)>>,
+    image_loading: Option<String>,
+    image_errors: HashMap<String, String>,
+    text_cache: Option<(String, Result<String, String>)>,
+    list_cache: Option<ListCache>,
     last_geometry: Instant,
     installed_fonts: Vec<crate::fonts::InstalledFont>,
     applied_font: String,
@@ -110,6 +123,7 @@ impl VaultApp {
             }
         };
         if app.shot.is_none() {
+            app.restart_updates = Some(crate::restart::watch());
             if let Some(root) = startup {
                 if let Err(e) = set_startup(true, &root) {
                     app.error = Some(format!("Login startup could not be updated: {e}"));
@@ -196,7 +210,9 @@ impl VaultApp {
             textures: HashMap::new(),
             logo,
             focus_search: false,
+            scroll_to_selected: false,
             shortcut_recording: false,
+            local_recorder: Default::default(),
             shortcut_pending: false,
             shortcut_display: String::new(),
             active_shortcut: None,
@@ -209,6 +225,15 @@ impl VaultApp {
             update_outcome,
             toast: None,
             last_cleanup: Instant::now(),
+            automatic_activation: false,
+            desktop_shortcut: None,
+            restart_updates: None,
+            replacement: None,
+            image_result: None,
+            image_loading: None,
+            image_errors: HashMap::new(),
+            text_cache: None,
+            list_cache: None,
             last_geometry: Instant::now(),
             installed_fonts,
             applied_font,
@@ -219,6 +244,28 @@ impl VaultApp {
     }
     fn handle_notice(&mut self, ctx: &Context, notice: Notice) {
         match notice {
+            Notice::PasteFeedback(message) => {
+                if self.hidden && self.restart_updates.is_some() && message.starts_with("Copied") {
+                    let _ = std::process::Command::new("notify-send")
+                        .args([
+                            "--app-name=ClipVault",
+                            "--icon=clipvault",
+                            "ClipVault",
+                            &message,
+                        ])
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn();
+                }
+                self.toast = Some((message, Instant::now()));
+            }
+            Notice::ShortcutConfigured(shortcut) => {
+                self.active_shortcut = None;
+                self.desktop_shortcut = Some(shortcut);
+                self.shortcut_recording = false;
+                self.shortcut_pending = false;
+                self.shortcut_feedback="Desktop binding configured and read back. Press it to verify; desktop registration is not independently confirmed.".into();
+            }
             Notice::Open => {
                 if !self.shortcut_recording && !self.shortcut_pending {
                     self.toggle(ctx);
@@ -226,8 +273,13 @@ impl VaultApp {
             }
             Notice::ShortcutInactive => {
                 self.active_shortcut = None;
+                self.desktop_shortcut = None;
+                self.shortcut_feedback =
+                    "No confirmed binding. Choose a shortcut or use desktop Keyboard settings."
+                        .into();
             }
             Notice::ShortcutActive(shortcut) => {
+                self.desktop_shortcut = None;
                 self.active_shortcut = Some(shortcut);
                 if self.shortcut_feedback.starts_with("Checking") {
                     self.shortcut_feedback =
@@ -236,6 +288,10 @@ impl VaultApp {
             }
             Notice::RecordingReady => {
                 self.shortcut_feedback = "Recording · Press your shortcut. Escape cancels.".into();
+                if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+                    self.local_recorder.begin();
+                    self.local_recorder.ready = true;
+                }
             }
             Notice::ShortcutCandidate(shortcut) => {
                 self.shortcut_display = shortcut;
@@ -249,6 +305,9 @@ impl VaultApp {
                 self.shortcut_recording = false;
                 self.shortcut_pending = false;
                 // Only a subsequent registration acknowledgement may mark a binding active.
+                if self.active_shortcut.is_none() && self.desktop_shortcut.is_none() {
+                    self.error = Some(error.clone());
+                }
                 self.shortcut_feedback = error;
             }
             Notice::ShortcutApplied(shortcut) => {
@@ -263,7 +322,11 @@ impl VaultApp {
                 self.error = None;
                 self.toast = Some(("Copied · Paste with Ctrl + V.".into(), Instant::now()));
                 let hide = self.store.lock().unwrap().settings.hide_after_copy;
-                if hide {
+                if self.automatic_activation {
+                    self.automatic_activation = false;
+                    self.hide(ctx);
+                    let _ = self.service.tx.send(Command::Paste);
+                } else if hide {
                     self.hide(ctx);
                 }
             }
@@ -271,6 +334,7 @@ impl VaultApp {
             Notice::ActivationFailed(id, error) => {
                 if self.pending_activation.as_deref() == Some(&id) {
                     self.pending_activation = None;
+                    self.automatic_activation = false;
                     self.toast = None;
                     self.error = Some(error);
                     if self.hidden {
@@ -280,6 +344,8 @@ impl VaultApp {
             }
             Notice::Status(s) => self.status = s,
             Notice::Unavailable(e) => {
+                self.pending_activation = None;
+                self.automatic_activation = false;
                 self.active_shortcut = None;
                 self.shortcut_recording = false;
                 self.shortcut_pending = false;
@@ -287,6 +353,7 @@ impl VaultApp {
                 self.error = Some(e);
             }
             Notice::Error(e) => {
+                self.automatic_activation = false;
                 if self.pending_activation.take().is_some() && self.hidden {
                     self.show(ctx);
                 }
@@ -299,7 +366,7 @@ impl VaultApp {
             return;
         }
         if message == "toggle" {
-            self.toggle(ctx);
+            let _ = self.service.tx.send(Command::Toggle);
         } else if message == "show" {
             self.show(ctx);
         }
@@ -332,15 +399,37 @@ impl VaultApp {
         if self.shot.is_none() {
             ctx.send_viewport_cmd(ViewportCommand::Visible(false));
             self.hidden = true;
+            self.textures.clear();
+            self.text_cache = None;
+            self.image_result = None;
+            self.image_loading = None;
         }
     }
     fn show(&mut self, ctx: &Context) {
+        let _ = self.service.tx.send(Command::RememberTarget);
         ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(ViewportCommand::Focus);
         self.hidden = false;
         self.minimized = false;
+        if let Some((message, time)) = &mut self.toast {
+            if message.starts_with("Copied") {
+                *time = Instant::now();
+            }
+        }
         self.focus_search = true;
+    }
+    fn restart_safely(&mut self, ctx: &Context) {
+        if self.editor.is_some() || self.pending_activation.is_some() {
+            return;
+        }
+        if self.mutate(|store| store.flush()) {
+            crate::restart::request();
+            self.quit(ctx);
+        } else {
+            self.replacement = None;
+            self.error=Some("Update is installed, but storage could not be flushed. Restart manually after resolving the storage error.".into());
+        }
     }
     fn quit(&mut self, ctx: &Context) {
         self.quitting = true;
@@ -361,12 +450,19 @@ impl VaultApp {
             }
         }
     }
+    fn activate_and_paste(&mut self, item: &Item) {
+        if self.pending_activation.is_none() {
+            self.activate(item);
+            self.automatic_activation = self.pending_activation.is_some();
+        }
+    }
     fn activate(&mut self, item: &Item) {
         // One outstanding request keeps delayed acknowledgements from hiding
         // the window after a newer copy has failed. Use saved identity, not row index.
         if self.pending_activation.is_some() {
             return;
         }
+        self.automatic_activation = false;
         self.toast = None;
         let result = {
             let store = self.store.lock().unwrap();
@@ -375,14 +471,28 @@ impl VaultApp {
                 .iter()
                 .find(|saved| saved.id == item.id)
                 .ok_or_else(|| "This clip is no longer in history".to_owned())
-                .and_then(|saved| store.snapshot(saved))
+                .and_then(|saved| {
+                    if saved.formats.is_empty() {
+                        return Err("This saved clip has no clipboard formats".into());
+                    }
+                    let folder = std::fs::canonicalize(store.root.join("items"))
+                        .map_err(|e| e.to_string())?;
+                    for format in &saved.formats {
+                        let path = std::fs::canonicalize(store.root.join(&format.file))
+                            .map_err(|e| e.to_string())?;
+                        if !path.starts_with(&folder) || !path.is_file() {
+                            return Err("Saved payload unavailable".into());
+                        }
+                    }
+                    Ok(())
+                })
         };
         match result {
-            Ok(data) if !data.is_empty() => {
+            Ok(()) => {
                 if self
                     .service
                     .tx
-                    .send(Command::Restore(item.id.clone(), data))
+                    .send(Command::RestoreItem(item.id.clone()))
                     .is_err()
                 {
                     self.error=Some("Clipboard service is unavailable. Restart ClipVault to reconnect; your history is saved.".into());
@@ -391,10 +501,6 @@ impl VaultApp {
                     self.pending_activation = Some(item.id.clone());
                     self.error = None;
                 }
-            }
-            Ok(_) => {
-                self.error =
-                    Some("This saved clip has no clipboard data. It was not copied.".into())
             }
             Err(e) => {
                 self.error = Some(format!(
@@ -469,7 +575,7 @@ impl VaultApp {
             ),
             TextureOptions::LINEAR,
         );
-        if self.textures.len() > 32 {
+        if self.textures.len() >= 16 {
             self.textures.clear();
         }
         self.textures.insert(item.id.clone(), tex.clone());
@@ -488,20 +594,60 @@ impl VaultApp {
                 .find(|f| f.mime.starts_with("image/"))?
                 .file,
         );
-        let image = image::open(&path)
-            .or_else(|_| crate::storage::native_image(&path))
-            .ok()?
-            .into_rgba8();
-        let texture = ctx.load_texture(
-            &key,
-            ColorImage::from_rgba_unmultiplied(
-                [image.width() as usize, image.height() as usize],
-                image.as_raw(),
-            ),
-            TextureOptions::LINEAR,
-        );
-        self.textures.insert(key, texture.clone());
-        Some(texture)
+        if let Some(rx) = &self.image_result {
+            if let Ok((id, result)) = rx.try_recv() {
+                self.image_result = None;
+                self.image_loading = None;
+                if let Err(error) = &result {
+                    self.image_errors.insert(id.clone(), error.clone());
+                }
+                if let Ok(image) = result {
+                    self.textures.retain(|id, _| !id.starts_with("full-"));
+                    let texture = ctx.load_texture(&id, image, TextureOptions::LINEAR);
+                    self.textures.insert(id, texture);
+                }
+            }
+        }
+        if let Some(texture) = self.textures.get(&key) {
+            return Some(texture.clone());
+        }
+        if self.image_errors.contains_key(&key) {
+            return None;
+        }
+        if self.image_loading.is_none() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            self.image_result = Some(rx);
+            self.image_loading = Some(key.clone());
+            let ctx = ctx.clone();
+            std::thread::spawn(move || {
+                let result = (|| {
+                    let mut reader = image::ImageReader::open(&path)
+                        .map_err(|e| e.to_string())?
+                        .with_guessed_format()
+                        .map_err(|e| e.to_string())?;
+                    let mut limits = image::Limits::default();
+                    limits.max_alloc = Some(128 * 1024 * 1024);
+                    reader.limits(limits);
+                    let image = reader
+                        .decode()
+                        .or_else(|_| crate::storage::native_image(&path))
+                        .map_err(|e| e.to_string())?;
+                    let image = if image.width() > 1600 || image.height() > 1200 {
+                        image.thumbnail(1600, 1200)
+                    } else {
+                        image
+                    }
+                    .into_rgba8();
+                    Ok(ColorImage::from_rgba_unmultiplied(
+                        [image.width() as usize, image.height() as usize],
+                        image.as_raw(),
+                    ))
+                })();
+                let _ = tx.send((key, result));
+                ctx.request_repaint();
+            });
+        }
+        None
     }
     fn header(&mut self, ui: &mut Ui, ctx: &Context) {
         ui.horizontal(|ui| {
@@ -511,7 +657,7 @@ impl VaultApp {
                 ctx.send_viewport_cmd(ViewportCommand::StartDrag);
             }
             if ui.available_width() > 420. {
-                ui.label(RichText::new("On this device").small().color(muted(ui)));
+                ui.label(RichText::new("On this device").color(muted(ui)));
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if !self.store.lock().unwrap().settings.system_title_bar {
@@ -547,14 +693,15 @@ impl VaultApp {
                 }
                 if ui.available_width() > 95. {
                     ui.label(
-                        RichText::new(if paused {
+                        RichText::new(if self.shot.is_some() {
+                            "• Preview"
+                        } else if paused {
                             "• Paused"
                         } else if self.status.starts_with("Connecting") || self.error.is_some() {
                             "• Check status"
                         } else {
                             "• Monitoring"
                         })
-                        .small()
                         .color(if paused {
                             muted(ui)
                         } else {
@@ -566,19 +713,31 @@ impl VaultApp {
         });
     }
     fn search(&mut self, ui: &mut Ui) {
-        let field = ui.add_sized(
-            [ui.available_width(), 36.],
-            TextEdit::singleline(&mut self.query)
-                .id(Id::new("search"))
-                .hint_text("Search text, links, and filenames…"),
-        );
-        if self.focus_search {
-            field.request_focus();
-            self.focus_search = false;
-        }
-        if field.changed() {
-            self.selected = None;
-        }
+        ui.horizontal(|ui| {
+            let clear_width = if self.query.is_empty() { 0. } else { 32. };
+            let field = ui.add_sized(
+                [ui.available_width() - clear_width, 30.],
+                TextEdit::singleline(&mut self.query)
+                    .id(Id::new("search"))
+                    .vertical_align(Align::Center)
+                    .hint_text("Search clips…"),
+            );
+            if self.focus_search {
+                field.request_focus();
+                self.focus_search = false;
+            }
+            if field.changed() {
+                self.selected = None;
+            }
+            if !self.query.is_empty() {
+                let clear = ui.button("×").on_hover_text("Clear search");
+                clear.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "Clear search"));
+                if clear.clicked() {
+                    self.query.clear();
+                    self.focus_search = true;
+                }
+            }
+        });
         ui.horizontal_wrapped(|ui| {
             for label in ["All", "Text", "Images", "Links", "Files", "Pinned"] {
                 if ui
@@ -610,12 +769,7 @@ impl VaultApp {
             ui.visuals().panel_fill
         };
         ui.painter().rect_filled(rect, 8, fill);
-        ui.painter().rect_stroke(
-            rect,
-            8,
-            ui.visuals().widgets.noninteractive.bg_stroke,
-            StrokeKind::Inside,
-        );
+
         if selected || response.has_focus() {
             ui.painter()
                 .rect_stroke(rect, 8, Stroke::new(1_f32, ACCENT), StrokeKind::Inside);
@@ -641,7 +795,7 @@ impl VaultApp {
         } else {
             icons::draw(ui.painter(), tile.shrink(7.), icon, muted(ui));
         }
-        let text_rect = Rect::from_min_max(rect.min + vec2(50., 17.), rect.max - vec2(84., 8.));
+        let text_rect = Rect::from_min_max(rect.min + vec2(50., 7.), rect.max - vec2(84., 8.));
         let title_width = text_rect.width().max(20.);
         let content = if matches!(item.kind.as_str(), "Text" | "Links") {
             item.preview.chars().take(240).collect::<String>()
@@ -661,6 +815,21 @@ impl VaultApp {
         let galley = ui.painter().layout_job(job);
         ui.painter()
             .galley(text_rect.min, galley, ui.visuals().text_color());
+        let timestamp = if let Some(time) = item.last_used {
+            format!("Last used {}", crate::storage::relative_time(time))
+        } else if item.captured_at.is_none() {
+            "Capture time unknown".into()
+        } else {
+            item.copied_label()
+        };
+        ui.painter().text(
+            rect.min + vec2(50., 32.),
+            Align2::LEFT_TOP,
+            &timestamp,
+            FontId::proportional(11.),
+            muted(ui),
+        );
+        response.clone().on_hover_text(item.exact_times());
         let controls_width = 72.;
         let mut child = ui.new_child(
             UiBuilder::new()
@@ -676,7 +845,7 @@ impl VaultApp {
             &mut child,
             if item.pinned { "pin-filled" } else { "pin" },
             if item.pinned { "Unpin" } else { "Pin" },
-            24.,
+            26.,
             if item.pinned { ACCENT } else { muted(ui) },
         )
         .clicked()
@@ -715,9 +884,9 @@ impl VaultApp {
             .pointer_interact_pos()
             .is_some_and(|p| p.x >= rect.right() - 80.);
         if response.clicked() && !on_control && action == 0 && !menu.response.clicked() {
-            self.activate(item);
+            self.activate_and_paste(item);
         }
-        if response.has_focus() || response.hovered() {
+        if response.hovered() && ctx.input(|i| i.pointer.delta() != Vec2::ZERO) {
             self.selected = Some(item.id.clone());
         }
         if selected && ctx.input(|i| i.key_pressed(Key::ArrowDown) || i.key_pressed(Key::ArrowUp)) {
@@ -757,11 +926,12 @@ impl VaultApp {
                 self.delete(item);
             }
         });
-        ui.label(
-            RichText::new("Copy, then press Ctrl + V in your destination app.")
-                .small()
-                .color(muted(ui)),
-        );
+        ui.label(item.copied_label())
+            .on_hover_text(item.exact_times());
+        if let Some(time) = item.last_used {
+            ui.label(format!("Last used {}", crate::storage::relative_time(time)))
+                .on_hover_text(item.exact_times());
+        }
         ui.separator();
         ScrollArea::vertical()
             .id_salt("full-preview")
@@ -779,7 +949,15 @@ impl VaultApp {
                     if item.kind == "Files" {
                         ui.label("File references only. The original files are not backed up.");
                     }
-                    let result = { self.store.lock().unwrap().full_text(item) };
+                    if self
+                        .text_cache
+                        .as_ref()
+                        .is_none_or(|(id, _)| id != &item.id)
+                    {
+                        self.text_cache =
+                            Some((item.id.clone(), self.store.lock().unwrap().full_text(item)));
+                    }
+                    let result = self.text_cache.as_ref().unwrap().1.clone();
                     match result {
                         Ok(text) => {
                             ui.add(Label::new(text).wrap().selectable(true));
@@ -817,6 +995,7 @@ impl VaultApp {
         ui.label("The original content, position, and pin remain unchanged. Edited clips start unpinned.");
         ScrollArea::vertical()
             .id_salt("editor")
+            .max_height(280.)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.add(
@@ -869,25 +1048,46 @@ impl VaultApp {
         };
         if let Err(e) = result {
             self.error = Some(e);
+        } else {
+            self.toast = Some(("Saved".into(), Instant::now()));
         }
     }
     fn settings(&mut self, ui: &mut Ui, ctx: &Context) {
-        if ui.button("Back to history").clicked() {
-            self.settings_open = false;
-        }
-        let previous_tab = self.settings_tab;
-        ui.horizontal_wrapped(|ui| {
-            for (i, label) in ["General", "Appearance", "Shortcuts", "Privacy", "About"]
-                .iter()
-                .enumerate()
-            {
-                ui.selectable_value(&mut self.settings_tab, i, *label);
-            }
+        let previous = self.settings_tab;
+        let available = ui.available_size();
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.;
+            ui.allocate_ui_with_layout(
+                vec2(96., available.y),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    if ui.button("History").clicked() {
+                        self.settings_open = false;
+                    }
+                    ui.add_space(12.);
+                    for (index, label) in ["General", "Appearance", "Shortcuts", "Privacy", "About"]
+                        .iter()
+                        .enumerate()
+                    {
+                        ui.selectable_value(&mut self.settings_tab, index, *label);
+                    }
+                },
+            );
+            ui.separator();
+            ui.allocate_ui_with_layout(
+                vec2((available.x - 148.).max(120.), available.y),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    ui.set_max_width((available.x - 164.).max(120.));
+                    self.settings_content(ui, ctx);
+                },
+            );
         });
-        if self.settings_tab != previous_tab || !self.settings_open {
+        if previous != self.settings_tab || !self.settings_open {
             self.cancel_recording();
         }
-        ui.separator();
+    }
+    fn settings_content(&mut self, ui: &mut Ui, ctx: &Context) {
         let mut s = self.store.lock().unwrap().settings.clone();
         let before = serde_json::to_string(&s).unwrap();
         let previous_startup = (s.startup, s.start_hidden);
@@ -898,33 +1098,39 @@ impl VaultApp {
                 0=>{
                     heading(ui,"History that stays useful","Choose what to keep and how ClipVault behaves.");
                     startup_changed=ui.checkbox(&mut s.startup,"Start on login").changed();
-                    ui.add_enabled_ui(s.startup, |ui| { startup_changed |= ui.checkbox(&mut s.start_hidden,"Start hidden").changed(); });
-                    ui.label(RichText::new("Start hidden applies only at login. Opening ClipVault from the app menu always shows the window.").small().color(muted(ui)));
-                    ui.label(RichText::new("Monitoring continues when the window is hidden. Copies made while ClipVault is not running cannot be captured.").small().color(muted(ui)));
+                    if s.startup {startup_changed |= ui.checkbox(&mut s.start_hidden,"Start hidden").changed();}
+                    ui.label(RichText::new("Start hidden applies only at login. Opening ClipVault from the app menu always shows the window.").color(muted(ui)));
+                    ui.label(RichText::new("Monitoring continues when the window is hidden. Copies made while ClipVault is not running cannot be captured.").color(muted(ui)));
                     ui.checkbox(&mut s.confirm_before_delete,"Confirm before deleting");
-                    ui.checkbox(&mut s.paused,"Pause clipboard monitoring");
+                    ui.checkbox(&mut s.always_on_top,"Always on top");
+                    ui.checkbox(&mut s.system_title_bar,"Use system title bar and borders");
                     ui.checkbox(&mut s.skip_consecutive,"Skip consecutive duplicates");
-                    ui.label(RichText::new("Identical content shares one record. When enabled, repeated consecutive copies leave its timestamp unchanged; otherwise recency refreshes.").small().color(muted(ui)));
+                    ui.label(RichText::new("Identical content shares one record. When enabled, repeated consecutive copies leave its timestamp unchanged; otherwise recency refreshes.").color(muted(ui)));
                     ui.checkbox(&mut s.hide_after_copy,"Hide after successfully copying a clip");
-                    ui.label(RichText::new("Off by default. When off, the window stays open and confirms Copied. Close hides the window while monitoring continues.").small().color(muted(ui)));
+                    ui.label("This preference applies to the explicit Copy action. Selecting a row or pressing Enter always hides history and attempts paste.");
                     ui.separator();
                     ui.checkbox(&mut s.age_enabled,"Enable age-based cleanup");
                     ui.add_enabled_ui(s.age_enabled,|ui|{ui.horizontal_wrapped(|ui|{ui.label("Delete unpinned clips after");ui.add(DragValue::new(&mut s.days).range(1..=3650).suffix(" days"));});});
                     ui.checkbox(&mut s.count_enabled,"Enable maximum-item cleanup");
                     ui.add_enabled_ui(s.count_enabled,|ui|{ui.horizontal_wrapped(|ui|{ui.label("Keep at most");ui.add(DragValue::new(&mut s.limit).range(1..=10000).suffix(" unpinned clips"));});});
-                    ui.label(RichText::new("Either rule, both, or neither can be enabled. Age and ordering use the last captured or reused time. Reusing refreshes it. Pins never expire and do not count toward the maximum.").small().color(muted(ui)));
+                    ui.label(RichText::new("Either rule, both, or neither can be enabled. Age cleanup uses the last-used time, or the saved capture time if never used. Either enabled limit can remove eligible unpinned clips. Pins never expire and do not count toward the maximum.").color(muted(ui)));
+                    ui.checkbox(&mut s.clear_on_reboot,"Clear unpinned history on reboot");
+                    ui.label("Off by default. Only a changed Linux boot ID triggers cleanup. Restarting ClipVault or updating its package does not. Pins stay safe.");
                     ui.separator();
                     ui.horizontal_wrapped(|ui|{ui.label("Maximum clip size");ui.add(DragValue::new(&mut s.max_mb).range(1..=128).suffix(" MB"));});
                     if ui.button("Clear unpinned history…").clicked(){self.confirm_clear=true;}
                 }
                 1=>{
                     heading(ui,"Appearance","A comfortable space for your clipboard.");
-                    ui.horizontal(|ui|{ui.selectable_value(&mut s.light,false,"Dark");ui.selectable_value(&mut s.light,true,"Light");});
+                    ui.horizontal_wrapped(|ui|{
+                        for (value,label) in [("system","System"),("light","Light"),("dark","Dark")] {
+                            if ui.selectable_label(if s.theme.is_empty(){(s.light && value=="light")||(!s.light && value=="dark")}else{s.theme==value},label).clicked(){s.theme=value.into();s.light=value=="light";}
+                        }
+                    });
                     ui.add_space(12.);
                     ui.horizontal(|ui|{ui.selectable_value(&mut s.compact,true,"Compact");ui.selectable_value(&mut s.compact,false,"Comfortable");});
-                    ui.label(RichText::new("Compact shows just the clip content. Comfortable adds one full-content preview on the right.").small().color(muted(ui)));
-                    ui.checkbox(&mut s.system_title_bar,"Use system title bar and borders");
-                    ui.label(RichText::new("The desktop provides native decorations when supported. Some Wayland compositors choose their own decoration style. With ClipVault controls, drag the app name and resize from any edge.").small().color(muted(ui)));
+                    ui.label(RichText::new("Compact shows just the clip content. Comfortable adds one full-content preview on the right.").color(muted(ui)));
+
                     ui.add_space(8.);
                     ui.label("App font");
                     ComboBox::from_id_salt("app-font").selected_text(if s.app_font.is_empty() { "System default" } else { &s.app_font }).width(220.).show_ui(ui, |ui| {
@@ -933,12 +1139,13 @@ impl VaultApp {
                     });
                     ui.label("The quick brown fox jumps over the lazy dog. Aa 0123456789");
                     if !self.font_available { ui.label("Saved font unavailable. Using System default until it is installed again."); }
-                    ui.checkbox(&mut s.always_on_top,"Always on top");
+                    ui.horizontal(|ui|{ui.label("Font size");ui.add(DragValue::new(&mut s.font_size).range(12.0..=22.0).suffix(" pt"));});
                     ui.label("Resize from the window border. Size and position are saved while running; Wayland controls window placement.");
                 }
                 2=>{ self.shortcuts_page(ui); }
                 3=>{
                     heading(ui,"Privacy","Clipboard history stays on this device.");
+                    ui.checkbox(&mut s.paused,"Pause clipboard monitoring");
                     ui.label("Checking for updates contacts GitHub. Clipboard content is never sent.");
                     ui.label("Automatic update checks are optional and disabled by default. No analytics, clips, exclusions, or personal file paths are sent.");
                     ui.label("Exclude content containing (one phrase per line)");
@@ -951,6 +1158,7 @@ impl VaultApp {
                     ui.label("Encryption: not encrypted. Private Linux account permissions protect the local files. Deletion is not secure erasure and does not clear your system clipboard or backups.");
                     let root=self.store.lock().unwrap().root.clone();
                     ui.add(Label::new(format!("Local storage: {}",root.display())).wrap());
+                    if ui.button("Open storage folder").clicked(){if let Err(e)=std::process::Command::new("xdg-open").arg(&root).spawn(){self.error=Some(e.to_string());}}
                 }
                 _=>{ self.about_page(ui, ctx, &mut s); }
 
@@ -974,8 +1182,50 @@ impl VaultApp {
             if retention_changed && deletes > 0 {
                 self.pending_settings = Some(s);
             } else {
+                if old.compact != s.compact {
+                    let maximized = ctx.input(|i| i.viewport().maximized == Some(true));
+                    let mut old_geometry = old.geometry();
+                    if !maximized {
+                        if let Some(rect) = ctx.input(|i| i.viewport().inner_rect) {
+                            old_geometry.size = [rect.width(), rect.height()];
+                        }
+                    }
+                    old_geometry.maximized = maximized;
+                    if old.compact {
+                        s.compact_geometry = Some(old_geometry);
+                    } else {
+                        s.comfortable_geometry = Some(old_geometry);
+                    }
+                    let geometry = s.geometry();
+                    ctx.send_viewport_cmd(ViewportCommand::MinInnerSize(vec2(
+                        if s.compact { 440. } else { 640. },
+                        420.,
+                    )));
+                    ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
+                    ctx.send_viewport_cmd(ViewportCommand::Maximized(false));
+                    ctx.send_viewport_cmd(ViewportCommand::InnerSize(vec2(
+                        geometry.size[0],
+                        geometry.size[1],
+                    )));
+                    ctx.send_viewport_cmd(ViewportCommand::Maximized(geometry.maximized));
+                    self.last_geometry = Instant::now();
+                }
                 self.apply_settings(s);
             }
+        }
+    }
+    fn begin_shortcut_recording(&mut self) {
+        if self.shortcut_recording || self.shortcut_pending {
+            return;
+        }
+        self.shortcut_recording = true;
+        self.shortcut_display = "Press your shortcut".into();
+        self.shortcut_feedback = "Starting keyboard recorder…".into();
+        if self.service.tx.send(Command::RecordShortcut(true)).is_err() {
+            self.shortcut_recording = false;
+            self.active_shortcut = None;
+            self.shortcut_feedback =
+                "Keyboard service unavailable; shortcut was not changed. Restart ClipVault.".into();
         }
     }
     fn shortcuts_page(&mut self, ui: &mut Ui) {
@@ -985,18 +1235,16 @@ impl VaultApp {
             "A faster way to get back to what you copied.",
         );
         Frame::group(ui.style()).inner_margin(16).corner_radius(10).show(ui, |ui| {
-            ui.set_width((ui.available_width()).max(0.));
-            ui.label(RichText::new("Open clipboard history").size(17.).strong());
+            ui.set_width((ui.available_width()-24.).max(0.));
+            ui.add(Label::new(RichText::new("Open clipboard history").size(17.).strong()).wrap());
             ui.label("Press once to show and focus. Press again to hide.");
             ui.add_space(8.);
             let saved = self.store.lock().unwrap().settings.shortcut.clone();
             let label = if self.shortcut_recording { self.shortcut_display.clone() }
                 else if self.shortcut_pending { "Finishing recording…".into() }
                 else { self.active_shortcut.as_ref().unwrap_or(&saved).replace('+', " + ") };
-            if ui.add_enabled(!self.shortcut_pending, Button::new(RichText::new(label).strong().size(18.)).min_size(vec2(210., 46.))).clicked() && !self.shortcut_recording {
-                if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-                    self.shortcut_feedback = "Wayland requires a desktop shortcut. Use the setup help below; ClipVault cannot register this binding directly.".into();
-                } else {
+            if ui.add_enabled_ui(!self.shortcut_pending, |ui|ui.add_sized([ui.available_width(),64.], Button::new(RichText::new(format!("Record shortcut\n{label}")).strong().size(16.)).wrap())).inner.clicked() && !self.shortcut_recording {
+                {
                     self.shortcut_recording = true; self.shortcut_display = "Press your shortcut".into();
                     self.shortcut_feedback = "Starting keyboard recorder…".into();
                     if self.service.tx.send(Command::RecordShortcut(true)).is_err() {
@@ -1005,43 +1253,48 @@ impl VaultApp {
                     }
                 }
             }
-            ui.label(RichText::new("Super is the Windows key").small().color(muted(ui)));
+            ui.label(RichText::new("Super is the Windows key").color(muted(ui)));
             ui.label("Hold Ctrl, Alt, Shift, or Super and press one letter or number. Release the full combination to save. Escape cancels.");
             ui.label(RichText::new(&self.shortcut_feedback).color(ui.visuals().hyperlink_color));
             if !self.shortcut_recording && !self.shortcut_pending {
                 ui.label(RichText::new(match &self.active_shortcut {
                     Some(s) => format!("Active: {}", s.replace('+', " + ")),
                     None => "No confirmed global binding. Use desktop setup below if unavailable.".into(),
-                }).small().color(muted(ui)));
+                }).color(muted(ui)));
             }
         });
+        if self.active_shortcut.is_none()
+            && self.desktop_shortcut.is_none()
+            && ui.button("Choose shortcut").clicked()
+        {
+            self.begin_shortcut_recording();
+        }
+        if ui.button("Open Keyboard settings").clicked() {
+            if let Err(e) = crate::desktop::open_keyboard() {
+                self.shortcut_feedback = e;
+            }
+        }
+        ui.label(format!(
+            "Desktop: {:?} · Session: {}",
+            crate::desktop::detect(),
+            std::env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "unknown".into())
+        ));
         ui.add_space(16.);
         ui.label(RichText::new("Within ClipVault").size(17.).strong());
-        Grid::new("local-shortcuts")
-            .num_columns(2)
-            .spacing([20., 12.])
-            .show(ui, |ui| {
-                for (keys, description) in [
-                    (vec!["Up", "Down"], "Select a history item"),
-                    (vec!["Enter"], "Copy the selected clip"),
-                    (vec!["Ctrl", "F"], "Focus search"),
-                    (vec!["Ctrl", "Shift", "P"], "Pin or unpin the selected clip"),
-                    (
-                        vec!["Delete"],
-                        "Delete selected clip; follows confirmation setting",
-                    ),
-                    (vec!["Escape"], "Cancel, go back, or hide history"),
-                    (vec!["Tab"], "Move between controls"),
-                ] {
-                    ui.horizontal(|ui| {
-                        for key in keys {
-                            keycap(ui, key);
-                        }
-                    });
-                    ui.add(Label::new(description).wrap());
-                    ui.end_row();
-                }
+        for (keys, description) in [
+            ("↑ / ↓", "Select previous / next clip"),
+            ("Enter", "Activate and attempt paste"),
+            ("Ctrl + F", "Focus search"),
+            ("Ctrl + Shift + P", "Pin / unpin"),
+            ("Delete", "Delete selected clip"),
+            ("Escape", "Cancel or hide history"),
+            ("Tab", "Move between controls"),
+        ] {
+            ui.vertical(|ui| {
+                keycap(ui, keys);
+                ui.add(Label::new(description).wrap());
             });
+        }
         ui.add_space(12.);
         ui.separator();
         ui.horizontal_wrapped(|ui| {
@@ -1049,15 +1302,19 @@ impl VaultApp {
             keycap(ui, "V");
             ui.label("pastes in the destination application.");
         });
-        ui.label(RichText::new("Selecting history copies it to your clipboard. Return to the app where you want to paste.").small().color(muted(ui)));
+        ui.label(RichText::new("Selecting history restores its saved formats, hides ClipVault, and attempts paste. If unavailable, press Ctrl+V in your app.").color(muted(ui)));
         ui.add_space(10.);
-        CollapsingHeader::new("Wayland & desktop shortcut setup").show(ui, |ui| {
-            ui.label("Wayland does not allow direct global registration through clipboard data-control. The displayed saved combination is not an active desktop binding.");
+        CollapsingHeader::new("Advanced desktop setup").show(ui, |ui| {
+            let root=self.store.lock().unwrap().root.clone();
+            ui.label("Exact command for this installation (preserves your data directory):");
+            ui.add(Label::new(crate::desktop::toggle_command(&root)).wrap().selectable(true));
+            ui.label("Cinnamon, GNOME, MATE and Xfce: ClipVault manages only its own custom action when the desktop settings tools are available. Changes made in Keyboard settings are read back. Configured means saved and read back; it is not independent proof that the desktop activated the shortcut.");
+            ui.label("Clipboard data-control does not register shortcuts. Desktop settings tools handle the binding separately. Plasma and unsupported desktops require manual setup.");
             ui.label("GNOME: Settings → Keyboard → View and Customize Shortcuts → Custom Shortcuts. Add ClipVault with command clipvault --toggle, then record Super+V there.");
             ui.label("KDE Plasma: System Settings → Keyboard → Shortcuts. Add an application/command for clipvault --toggle and assign your keys.");
             ui.label("Sway: bindsym --no-repeat $mod+v exec /absolute/path/to/clipvault --toggle");
             ui.label("Hyprland: bind = SUPER, V, exec, /absolute/path/to/clipvault --toggle (do not use a repeating bind).");
-            ui.label("Use your installed executable’s absolute path if it is not in PATH. For AppImage, use the stable AppImage path. Include the same --data-dir if you use custom storage. Remove conflicting desktop bindings. This also works on X11 when a global grab is unavailable.");
+            ui.label("Use your installed executable’s absolute path if it is not in PATH. For AppImage, use the stable AppImage path. Include the same --data-dir if you use custom storage. Review conflicts in Keyboard settings; ClipVault never removes another action. This also works on X11 when a global grab is unavailable.");
         });
     }
     fn start_update_check(&mut self, ctx: &Context, automatic: bool) {
@@ -1145,7 +1402,6 @@ impl VaultApp {
                 ui.label(RichText::new("A little history. A smoother workflow.").color(muted(ui)));
                 ui.label(
                     RichText::new(format!("v{} · Native Rust app", env!("CARGO_PKG_VERSION")))
-                        .small()
                         .color(ui.visuals().hyperlink_color),
                 );
             });
@@ -1251,13 +1507,13 @@ impl VaultApp {
                 settings.updates = self.store.lock().unwrap().settings.updates.clone();
             }
             ui.checkbox(&mut settings.updates.automatic, "Automatically check once a day");
-            ui.label(RichText::new("Optional and off by default. Updates are installed manually.").small().color(muted(ui)));
+            ui.label(RichText::new("Optional and off by default. Updates are installed manually.").color(muted(ui)));
             if let Some(t) = settings.updates.last_attempt {
                 let date = chrono::DateTime::from_timestamp(t, 0).map(|t| t.format("%Y-%m-%d %H:%M UTC").to_string()).unwrap_or_else(|| "Unknown time".into());
-                ui.label(RichText::new(format!("Last check: {date}")).small().color(muted(ui)));
+                ui.label(RichText::new(format!("Last check: {date}")).color(muted(ui)));
                 ui.label(if self.checker.running() { "Checking for updates…" } else if settings.updates.last_status == "Checking for updates…" { "Unable to check; try again. The previous check was interrupted." } else { &settings.updates.last_status });
-            } else { ui.label(RichText::new("No update check yet.").small().color(muted(ui))); }
-            if cooldown && !self.checker.running() { ui.label(RichText::new("Please wait before checking again.").small().color(muted(ui))); }
+            } else { ui.label(RichText::new("No update check yet.").color(muted(ui))); }
+            if cooldown && !self.checker.running() { ui.label(RichText::new("Please wait before checking again.").color(muted(ui))); }
             if let Some(crate::updates::Outcome::Available { version, url }) = self.update_outcome.clone() {
                 ui.horizontal_wrapped(|ui| {
                     if ui.button("View release / Download").clicked() && crate::updates::official_release(&url) { ctx.open_url(OpenUrl::new_tab(url)); }
@@ -1265,11 +1521,11 @@ impl VaultApp {
                         settings.updates.dismissed_version = Some(version.clone()); self.toast = None;
                     }
                 });
-                if settings.updates.dismissed_version.as_deref() == Some(&version) { ui.label(RichText::new("Reminder dismissed for this release. You can still download it above.").small().color(muted(ui))); }
+                if settings.updates.dismissed_version.as_deref() == Some(&version) { ui.label(RichText::new("Reminder dismissed for this release. You can still download it above.").color(muted(ui))); }
                 ui.label("Choose the .deb or AppImage on GitHub and install it yourself. ClipVault never downloads or installs updates.");
             }
             ui.add_space(4.);
-            ui.label(RichText::new("Clipboard history stays on this device. Checking for updates contacts GitHub. Clipboard content is never sent.").small().color(muted(ui)));
+            ui.label(RichText::new("Clipboard history stays on this device. Checking for updates contacts GitHub. Clipboard content is never sent.").color(muted(ui)));
         });
         debug_assert!(
             ui.min_rect().is_finite(),
@@ -1279,7 +1535,7 @@ impl VaultApp {
         ui.add_space(14.);
         CollapsingHeader::new("Linux desktop compatibility").show(ui, |ui| {
             ui.label("X11 supports clipboard monitoring and global shortcuts. Wayland needs ext-data-control or wlr-data-control and a desktop shortcut for clipvault --toggle. GNOME Wayland may require an appropriate extension or an X11 session. Support varies by compositor.");
-            ui.label(RichText::new(&self.status).small().color(muted(ui)));
+            ui.label(RichText::new(&self.status).color(muted(ui)));
         });
         ui.separator();
         CollapsingHeader::new("License & acknowledgments").show(ui, |ui| {
@@ -1362,7 +1618,7 @@ impl VaultApp {
             ScrollArea::vertical()
                 .max_height((ctx.screen_rect().height() - 180.).max(100.))
                 .show(ui, |ui| {
-                    ui.add(Label::new(include_str!("../CHANGELOG-v1.2.0.txt")).wrap());
+                    ui.add(Label::new(include_str!("../CHANGELOG-v2.0.0.txt")).wrap());
                 });
             if ui.button("Done").clicked() {
                 self.dismiss_changelog();
@@ -1375,14 +1631,24 @@ impl VaultApp {
         ctx: &Context,
         items: &[Item],
     ) -> scroll_area::ScrollAreaOutput<()> {
-        ScrollArea::vertical()
-            .id_salt("history")
+        let mut scroll = ScrollArea::vertical().id_salt("history");
+        if self.scroll_to_selected {
+            self.scroll_to_selected = false;
+            if let Some(index) = items
+                .iter()
+                .position(|item| self.selected.as_deref() == Some(&item.id))
+            {
+                scroll = scroll.vertical_scroll_offset(
+                    (index as f32 * 61. - ui.available_height() / 2.).max(0.),
+                );
+            }
+        }
+        scroll
             .scroll_bar_visibility(scroll_area::ScrollBarVisibility::AlwaysVisible)
             .auto_shrink([false, false])
-            .show(ui, |ui| {
-                for item in items {
+            .show_rows(ui, 52., items.len(), |ui, range| {
+                for item in &items[range] {
                     self.row(ui, ctx, item, true);
-                    ui.add_space(4.);
                 }
             })
     }
@@ -1400,7 +1666,14 @@ impl VaultApp {
             self.preview = current;
         }
         self.consider_changelog();
-        let settings = self.store.lock().unwrap().settings.clone();
+        let mut settings = self.store.lock().unwrap().settings.clone();
+        settings.light = match settings.theme.as_str() {
+            "light" => true,
+            "dark" => false,
+            "system" => ctx.input(|i| i.raw.system_theme == Some(egui::Theme::Light)),
+            _ => settings.light,
+        };
+        ctx.set_zoom_factor((settings.font_size / 14.).clamp(0.85, 1.6));
         if settings.app_font != self.applied_font {
             self.font_available =
                 crate::fonts::apply(ctx, &settings.app_font, &self.installed_fonts);
@@ -1457,10 +1730,32 @@ impl VaultApp {
             egui::WindowLevel::Normal
         }));
         let query = self.query.to_lowercase();
-        let items: Vec<_> = {
-            self.store
-                .lock()
-                .unwrap()
+        let key = {
+            let store = self.store.lock().unwrap();
+            (
+                store.revision,
+                store.items.len(),
+                query.clone(),
+                self.category.clone(),
+            )
+        };
+        if self.list_cache.as_ref().is_none_or(|(old, _)| old != &key) {
+            let store = self.store.lock().unwrap();
+            let matches = if query.is_empty() {
+                None
+            } else {
+                Some(store.search_ids(&query))
+            };
+            let mut search_error = None;
+            let matched = match matches {
+                Some(Ok(ids)) => Some(ids),
+                Some(Err(e)) => {
+                    search_error = Some(e);
+                    None
+                }
+                None => None,
+            };
+            let items = store
                 .items
                 .iter()
                 .filter(|i| {
@@ -1468,12 +1763,19 @@ impl VaultApp {
                         || self.category == i.kind
                         || (self.category == "Pinned" && i.pinned))
                         && (query.is_empty()
+                            || matched.as_ref().is_some_and(|ids| ids.contains(&i.id))
                             || i.title.to_lowercase().contains(&query)
                             || i.preview.to_lowercase().contains(&query))
                 })
                 .cloned()
-                .collect()
-        };
+                .collect();
+            drop(store);
+            if let Some(e) = search_error {
+                self.error = Some(format!("Search unavailable: {e}"));
+            }
+            self.list_cache = Some((key, std::sync::Arc::new(items)));
+        }
+        let items = self.list_cache.as_ref().unwrap().1.clone();
         let mut selected_index = items
             .iter()
             .position(|item| self.selected.as_deref() == Some(&item.id))
@@ -1482,11 +1784,13 @@ impl VaultApp {
         let modal = self.confirm_clear
             || self.confirm_delete.is_some()
             || self.pending_settings.is_some()
-            || self.changelog_open;
+            || self.changelog_open
+            || self.editor.is_some();
         if !self.shortcut_recording
             && !self.shortcut_pending
             && !modal
             && !self.settings_open
+            && !ctx.memory(|m| m.any_popup_open())
             && self.editor.is_none()
             && self.preview.is_none()
         {
@@ -1495,20 +1799,24 @@ impl VaultApp {
             }
             if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowDown)) {
                 selected_index = (selected_index + 1).min(items.len().saturating_sub(1));
+                self.scroll_to_selected = true;
             }
             if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowUp)) {
                 selected_index = selected_index.saturating_sub(1);
+                self.scroll_to_selected = true;
             }
             self.selected = items.get(selected_index).map(|item| item.id.clone());
             if let Some(item) = items.get(selected_index) {
                 let focus = ctx.memory(|m| m.focused());
                 let history_focused = focus.is_none()
                     || focus == Some(Id::new("search"))
-                    || focus == Some(Id::new(("clip-row", &item.id)));
+                    || items
+                        .iter()
+                        .any(|row| focus == Some(Id::new(("clip-row", &row.id))));
                 // Enter on a focused action belongs to that action, not history.
                 if history_focused && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter))
                 {
-                    self.activate(item);
+                    self.activate_and_paste(item);
                 }
                 if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL | Modifiers::SHIFT, Key::P)) {
                     self.pin(item);
@@ -1526,6 +1834,8 @@ impl VaultApp {
         {
             if self.changelog_open {
                 self.dismiss_changelog();
+            } else if self.editor.is_some() {
+                self.editor = None;
             } else if modal {
                 self.confirm_clear = false;
                 self.confirm_delete = None;
@@ -1556,11 +1866,7 @@ impl VaultApp {
             .show(ctx, |ui| {
                 if self.settings_open && self.settings_tab == 4 {
                     ui.horizontal_wrapped(|ui| {
-                        ui.label(
-                            RichText::new("Open source. Made for Linux.")
-                                .small()
-                                .color(muted(ui)),
-                        );
+                        ui.label(RichText::new("Open source. Made for Linux.").color(muted(ui)));
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if ui.button("Quit ClipVault").clicked() {
                                 self.quit(ctx);
@@ -1571,41 +1877,64 @@ impl VaultApp {
                 }
                 ui.horizontal_wrapped(|ui| {
                     ui.label(
-                        RichText::new("Up/Down Select   Enter Copy   Ctrl+F Search   Esc Back")
-                            .size(10.)
+                        RichText::new("Up/Down Select   Enter Paste   Ctrl+F Search   Esc Hide")
+                            .size(12.)
                             .color(muted(ui)),
                     );
                     if let Some((message, time)) = &self.toast {
                         if time.elapsed() < Duration::from_secs(5) {
-                            ui.label(RichText::new(message).small().color(ACCENT));
+                            ui.label(RichText::new(message).color(ACCENT));
                         }
                     }
                 });
             });
         CentralPanel::default().frame(Frame::NONE.fill(ctx.style().visuals.panel_fill).inner_margin(18)).show(ctx,|ui|{
-            if let Some(e)=self.error.clone(){ui.horizontal_wrapped(|ui|{ui.colored_label(if settings.light{Color32::DARK_RED}else{Color32::from_rgb(238,176,150)},&e);if ui.small_button("Dismiss").clicked(){self.error=None;}});ui.separator();}
+            if let Some(e)=self.error.clone(){ui.horizontal_wrapped(|ui|{ui.add(Label::new(RichText::new(&e).color(if settings.light{Color32::DARK_RED}else{Color32::from_rgb(238,176,150)})).wrap());if ui.small_button("Dismiss").clicked(){self.error=None;}});
+                if self.active_shortcut.is_none()&&self.desktop_shortcut.is_none(){ui.horizontal_wrapped(|ui|{
+                    if ui.button("Choose shortcut").clicked(){self.settings_open=true;self.settings_tab=2;self.begin_shortcut_recording();}
+                    if ui.button("Open Keyboard settings").clicked(){if let Err(error)=crate::desktop::open_keyboard(){self.error=Some(error);}}
+                });}
+                ui.separator();}
             ui.add_enabled_ui(!modal,|ui|{
                 if self.settings_open{self.settings(ui,ctx);return;}
-                if self.editor.is_some(){self.editor(ui);return;}
                 if let Some(item)=self.preview.clone(){self.detail(ui,ctx,&item,true);return;}
                 self.search(ui);ui.separator();
-                ui.horizontal(|ui|{ui.label(RichText::new(format!("{} clips · Newest first",items.len())).small().color(muted(ui)));ui.with_layout(Layout::right_to_left(Align::Center),|ui|{if ui.small_button("Clear…").clicked(){self.confirm_clear=true;}});});
+                ui.horizontal(|ui|{ui.label(RichText::new(format!("{} clips · Newest first",items.len())).color(muted(ui)));ui.with_layout(Layout::right_to_left(Align::Center),|ui|{if ui.small_button("Clear…").clicked(){self.confirm_clear=true;}});});
+                if let Some(version)=self.replacement.clone(){
+                    ui.label(format!("An installed update ({version}) is ready. Close the panel to restart safely. Unsaved edits are kept open."));
+                    if ui.button("Restart now").clicked() && self.editor.is_none(){self.restart_safely(ctx);}
+                }
                 if items.is_empty(){
-                    ui.add_space(55.);ui.vertical_centered(|ui|{ui.image((self.logo.id(),vec2(66.,66.)));ui.heading(if query.is_empty(){"Your clipboard, remembered."}else{"No matching clips"});ui.label("Copy text, an image, or a file reference while monitoring is enabled.");ui.label(RichText::new(&self.status).small().color(muted(ui)));});return;
+                    ui.add_space(55.);ui.vertical_centered(|ui|{ui.image((self.logo.id(),vec2(66.,66.)));ui.heading(if query.is_empty(){"Your clipboard, remembered."}else{"No matching clips"});
+                    if query.is_empty(){ui.label("Copy text, an image, or a file reference while monitoring is enabled.");}
+                    else {ui.label("Try a different search or filter.");if ui.button("Clear search").clicked(){self.query.clear();self.category="All".into();self.focus_search=true;}}ui.label(RichText::new(&self.status).color(muted(ui)));});return;
                 }
                 if !settings.compact {
-                    ui.columns(2, |cols| {
-                        self.history_list(&mut cols[0], ctx, &items);
-                        if let Some(item) = items.iter().find(|i| self.selected.as_deref() == Some(&i.id)) {
-                            self.detail(&mut cols[1],ctx,item,false);
-                        }
-                    });
+                    let available=ui.available_size();
+                    let min=190.;
+                    let width=available.x.max(min*2.+12.);
+                    let left=(width*settings.divider).clamp(min,width-min-12.);
+                    let (rect,_)=ui.allocate_exact_size(vec2(width,available.y),Sense::hover());
+                    let divider=Rect::from_min_size(rect.min+vec2(left,0.),vec2(10.,rect.height()));
+                    let response=ui.interact(divider,Id::new("preview-divider"),Sense::drag()).on_hover_cursor(CursorIcon::ResizeHorizontal);
+                    ui.painter().line_segment([divider.center_top(),divider.center_bottom()],Stroke::new(1_f32,ui.visuals().widgets.noninteractive.bg_stroke.color));
+                    if response.dragged(){if let Some(p)=response.interact_pointer_pos(){let ratio=((p.x-rect.left())/width).clamp(min/width,(width-min-12.)/width);self.mutate(|s|{s.settings.divider=ratio;s.save_settings()});}}
+                    let mut list=ui.new_child(UiBuilder::new().id_salt("history-pane").max_rect(Rect::from_min_size(rect.min,vec2(left,rect.height()))).layout(Layout::top_down(Align::Min)));
+                    self.history_list(&mut list,ctx,&items);
+                    let mut preview=ui.new_child(UiBuilder::new().id_salt("preview-pane").max_rect(Rect::from_min_max(pos2(divider.right()+2.,rect.top()),rect.max)).layout(Layout::top_down(Align::Min)));
+                    if let Some(item)=items.iter().find(|i|self.selected.as_deref()==Some(&i.id)){self.detail(&mut preview,ctx,item,false);}
                 } else {
                     self.history_list(ui, ctx, &items);
                 }
             });
         });
         self.dialogs(ctx);
+        if self.editor.is_some() {
+            egui::Modal::new(Id::new("edit-clip")).show(ctx, |ui| {
+                ui.set_width((ctx.screen_rect().width() - 70.).clamp(250., 600.));
+                self.editor(ui);
+            });
+        }
         self.changelog(ctx);
         if !settings.system_title_bar {
             custom_resize(ctx);
@@ -1614,6 +1943,44 @@ impl VaultApp {
 }
 impl eframe::App for VaultApp {
     fn update(&mut self, ctx: &Context, _: &mut eframe::Frame) {
+        if let Some(rx) = &self.restart_updates {
+            while let Ok(version) = rx.try_recv() {
+                if let Some(message) = version.strip_prefix("manual:") {
+                    self.error = Some(message.into());
+                } else if !version.is_empty() {
+                    self.replacement = Some(version);
+                }
+            }
+        }
+        if self.replacement.is_some()
+            && self.hidden
+            && self.editor.is_none()
+            && self.pending_settings.is_none()
+            && self.pending_activation.is_none()
+            && !self.shortcut_recording
+        {
+            self.restart_safely(ctx);
+        }
+        if self.shortcut_recording && self.local_recorder.recording {
+            let result = ctx.input(|i| {
+                self.local_recorder.input(
+                    &i.events,
+                    i.modifiers,
+                    !i.keys_down.is_empty(),
+                    i.focused,
+                )
+            });
+            self.shortcut_display = self.local_recorder.display();
+            if let Some(result) = result {
+                match result {
+                    crate::shortcut::Result::Saved(next) => {
+                        self.shortcut_pending = true;
+                        let _ = self.service.tx.send(Command::SetShortcut(next));
+                    }
+                    _ => self.cancel_recording(),
+                }
+            }
+        }
         self.minimized = ctx.input(|i| i.viewport().minimized == Some(true));
         self.poll_updates(ctx);
         while let Ok(notice) = self.service.rx.try_recv() {
@@ -1647,9 +2014,19 @@ impl eframe::App for VaultApp {
                 let size = [r.width().max(440.), r.height().max(420.)];
                 let position = outer.map(|r| [r.min.x, r.min.y]);
                 self.mutate(|s| {
-                    s.settings.window_size = size;
-                    s.settings.window_position = position;
-                    s.save_settings()
+                    let mut geometry = s.settings.geometry();
+                    let maximized = ctx.input(|i| i.viewport().maximized == Some(true));
+                    if !maximized {
+                        geometry.size = size;
+                    }
+                    geometry.maximized = maximized;
+                    if geometry != s.settings.geometry() || s.settings.window_position != position {
+                        s.settings.set_geometry(geometry);
+                        s.settings.window_position = position;
+                        s.save_settings()
+                    } else {
+                        Ok(())
+                    }
                 });
                 if let (Some(out), Some(screen)) = (outer, monitor) {
                     if out.min.x > screen.x - 40.
@@ -1715,7 +2092,7 @@ impl eframe::App for VaultApp {
                 }
             }
         } else {
-            ctx.request_repaint_after(Duration::from_millis(if self.hidden { 250 } else { 100 }));
+            ctx.request_repaint_after(Duration::from_secs(if self.hidden { 30 } else { 1 }));
         }
     }
 }
@@ -1818,7 +2195,7 @@ fn link_card(ui: &mut Ui, link: (&str, &str, &str, &str)) {
 }
 fn heading(ui: &mut Ui, title: &str, subtitle: &str) {
     ui.label(RichText::new(title).strong().size(19.));
-    ui.label(RichText::new(subtitle).small().color(muted(ui)));
+    ui.label(RichText::new(subtitle).color(muted(ui)));
     ui.add_space(12.);
 }
 fn copy_label(item: &Item) -> &'static str {
@@ -1912,16 +2289,7 @@ fn set_startup(enabled: bool, root: &std::path::Path) -> Result<(), String> {
         }
         return Ok(());
     }
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let image_root = std::env::var_os("APPDIR").and_then(|d| std::fs::canonicalize(d).ok());
-    let exe = std::env::var_os("APPIMAGE")
-        .map(PathBuf::from)
-        .filter(|p| {
-            p.is_absolute()
-                && p.is_file()
-                && image_root.as_ref().is_some_and(|d| exe.starts_with(d))
-        })
-        .unwrap_or(exe);
+    let exe = crate::desktop::executable()?;
     let escape = |s: &str| {
         s.replace('\\', "\\\\")
             .replace('"', "\\\"")
@@ -1970,6 +2338,11 @@ mod tests {
             rx,
             root,
         )
+    }
+    fn restore_command(rx: &Receiver<Command>, store: &Shared) -> Command {
+        let command = rx.try_recv().expect("activation dispatch");
+        let (out, _) = mpsc::channel();
+        crate::clipboard::resolve_restore(command, store, &out).expect("readable original payload")
     }
     fn click_row(app: &mut VaultApp, ctx: &Context, item: &Item, pos: Pos2) {
         for pressed in [None, Some(true), Some(false)] {
@@ -2194,7 +2567,7 @@ mod tests {
                         for filter in ["All", "Text", "Images", "Links", "Files", "Pinned"] {
                             assert!(labels.contains(&filter));
                         }
-                        assert!(labels.contains(&"Search text, links, and filenames…"));
+                        assert!(labels.contains(&"Search clips…"));
                         assert!(labels.iter().any(|t| t.contains("example.com/clip")));
                         assert!(labels.iter().any(|t| t.contains("report.pdf")));
                         if compact {
@@ -2202,7 +2575,6 @@ mod tests {
                             assert!(labels.contains(&"Saved text Full text content"));
                             assert!(!labels.iter().any(|t| t.contains("PREVIEW")
                                 || t.contains("Saved formats:")
-                                || t.contains("Just now")
                                 || t.contains("Copied image")));
                         } else {
                             assert!(labels.contains(&"Copy text"));
@@ -2266,7 +2638,7 @@ mod tests {
                 .clone();
             let expected_data = app.store.lock().unwrap().snapshot(&item).unwrap();
             app.activate(&item);
-            let Command::Restore(id, data) = rx.try_recv().unwrap() else {
+            let Command::Restore(id, data) = restore_command(&rx, &app.store) else {
                 panic!("restore expected")
             };
             assert_eq!(id, item.id);
@@ -2298,8 +2670,8 @@ mod tests {
         };
         // Read text/image payloads from disk after a database reopen, not a demo cache.
         *app.store.lock().unwrap() = Store::open(root.clone()).unwrap();
-        click_row(&mut app, &ctx, &item, pos2(80., 35.));
-        let Command::Restore(id, restored) = rx.try_recv().unwrap() else {
+        app.activate(&item);
+        let Command::Restore(id, restored) = restore_command(&rx, &app.store) else {
             panic!("restore expected")
         };
         assert_eq!(id, item.id);
@@ -2371,7 +2743,10 @@ mod tests {
                 };
                 app.store.lock().unwrap().settings.hide_after_copy = hide;
                 app.activate(&item);
-                assert!(matches!(rx.try_recv(), Ok(Command::Restore(_, _))));
+                assert!(matches!(
+                    restore_command(&rx, &app.store),
+                    Command::Restore(_, _)
+                ));
                 // Ownership and database errors take the same explicit failure path.
                 for error in ["Could not take clipboard ownership", "Clipboard ready, but recency could not be saved: SQLite could not save clipboard history"] {
                     app.handle_notice(&ctx, Notice::ActivationFailed(item.id.clone(), error.into()));
@@ -2379,7 +2754,7 @@ mod tests {
                     assert_eq!(app.error.as_deref(), Some(error));
                     assert!(app.toast.is_none());
                     app.activate(&item);
-                    assert!(matches!(rx.try_recv(), Ok(Command::Restore(_, _))));
+                    assert!(matches!(restore_command(&rx,&app.store), Command::Restore(_, _)));
                 }
                 app.handle_notice(
                     &ctx,
@@ -2406,7 +2781,10 @@ mod tests {
         app.store.lock().unwrap().settings.hide_after_copy = true;
         app.activate(&item);
         app.activate(&item);
-        assert!(matches!(rx.try_recv(), Ok(Command::Restore(_, _))));
+        assert!(matches!(
+            restore_command(&rx, &app.store),
+            Command::Restore(_, _)
+        ));
         assert!(
             rx.try_recv().is_err(),
             "only one restore can be outstanding"
@@ -2446,10 +2824,12 @@ mod tests {
         assert!(!app.hidden, "another launch shows the same app");
         app.hide(&ctx);
         app.handle_ipc(&ctx, "toggle");
+        assert!(matches!(rx.try_iter().last(), Some(Command::Toggle)));
+        app.handle_notice(&ctx, Notice::Open);
         assert!(!app.hidden);
         assert!(!app.store.lock().unwrap().settings.paused);
         assert!(!app.quitting);
-        assert!(rx.try_recv().is_err());
+        assert!(rx.try_iter().all(|c| matches!(c, Command::RememberTarget)));
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
@@ -2588,10 +2968,7 @@ mod tests {
                 CentralPanel::default().show(ctx, |ui| app.row(ui, ctx, &item, true));
             });
         }
-        let Command::Restore(id, data) = rx
-            .try_recv()
-            .expect("click must request actual clipboard restore")
-        else {
+        let Command::Restore(id, data) = restore_command(&rx, &app.store) else {
             panic!("wrong command")
         };
         assert_eq!(id, item.id);
@@ -2625,12 +3002,15 @@ mod tests {
             app.handle_notice(&ctx, Notice::Open);
             assert!(app.hidden);
             app.handle_ipc(&ctx, "toggle");
+            app.handle_notice(&ctx, Notice::Open);
             assert!(!app.hidden);
             app.minimized = true;
             app.handle_ipc(&ctx, "toggle");
+            app.handle_notice(&ctx, Notice::Open);
             assert!(!app.minimized);
             assert!(!app.hidden);
             app.handle_ipc(&ctx, "toggle");
+            app.handle_notice(&ctx, Notice::Open);
             assert!(app.hidden);
         }
         app.shortcut_recording = true;
@@ -2703,6 +3083,7 @@ mod tests {
                     app.settings_tab = tab;
                     let mut textures = HashMap::new();
                     for frame in 0..3 {
+                        let mut used = Vec2::ZERO;
                         let output = ctx.run(
                             RawInput {
                                 screen_rect: Some(Rect::from_min_size(
@@ -2711,8 +3092,12 @@ mod tests {
                                 )),
                                 ..Default::default()
                             },
-                            |ctx| { app.render(ctx); assert!(ctx.used_size().x <= width as f32 + 1., "overflow width={width} tab={tab} light={light} frame={frame} size={:?}",ctx.used_size()); },
+                            |ctx| {
+                                app.render(ctx);
+                                used = ctx.used_size();
+                            },
                         );
+                        assert!(used.x <= width as f32 + 1., "overflow width={width} tab={tab} light={light} frame={frame} size={:?}",used);
                         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
                             "target/layout/{}-{}-{width}.png",
                             if tab == 4 { "about" } else { "shortcuts" },
@@ -2937,12 +3322,15 @@ mod tests {
         frame(&mut app, &ctx);
         assert!(app.changelog_open);
         let output = frame(&mut app, &ctx);
-        text_position(&output, "What’s New in ClipVault v1.2.0");
+        text_position(&output, "What’s New in ClipVault v2.0.0");
         let output = frame(&mut app, &ctx);
         click_at(&ctx, text_position(&output, "Done"), |ctx| app.render(ctx));
         assert!(!app.changelog_open);
         let store = Store::open(root.clone()).unwrap();
-        assert_eq!(store.settings.changelog_dismissed_version, "1.2.0");
+        assert_eq!(
+            store.settings.changelog_dismissed_version,
+            env!("CARGO_PKG_VERSION")
+        );
         app.changelog_considered = false;
         frame(&mut app, &ctx);
         assert!(!app.changelog_open);
@@ -2966,7 +3354,7 @@ mod tests {
             .changelog_dismissed_version = "1.0.0".into();
         frame(&mut app, &ctx);
         assert!(app.changelog_open, "another upgrade should show it again");
-        assert!(rx.try_recv().is_err());
+        assert!(rx.try_iter().all(|c| matches!(c, Command::RememberTarget)));
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
@@ -3004,6 +3392,14 @@ mod tests {
                 "no repeated preview title"
             );
             if item.kind == "Images" {
+                let deadline = Instant::now() + Duration::from_secs(3);
+                while app.full_image(&ctx, &item).is_none() {
+                    assert!(
+                        Instant::now() < deadline,
+                        "async image decoding did not finish"
+                    );
+                    std::thread::sleep(Duration::from_millis(2));
+                }
                 assert_eq!(
                     app.textures[&format!("full-{}", item.id)].size(),
                     [1200, 700]
@@ -3022,7 +3418,7 @@ mod tests {
             click_at(&ctx, text_position(&output, copy_label(&item)), |ctx| {
                 render(&mut app, ctx)
             });
-            let Command::Restore(id, data) = rx.try_recv().unwrap() else {
+            let Command::Restore(id, data) = restore_command(&rx, &app.store) else {
                 panic!("copy must restore")
             };
             assert_eq!(id, item.id);
@@ -3191,5 +3587,101 @@ mod tests {
         assert_eq!(app.store.lock().unwrap().items.len(), 1);
         assert!(rx.try_recv().is_err());
         std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    #[ignore = "explicit reproducible performance workload; no desktop claims"]
+    fn performance_large_history() {
+        let (mut app, _commands, root) = app();
+        let ctx = Context::default();
+        let mut data = Snapshot::new();
+        data.insert("text/plain".into(), b"Performance fixture".to_vec());
+        app.store
+            .lock()
+            .unwrap()
+            .ingest(&data, "benchmark")
+            .unwrap();
+        let item = app.store.lock().unwrap().items[0].clone();
+        {
+            let mut store = app.store.lock().unwrap();
+            store.settings.compact = true;
+            for n in 1..2000 {
+                let mut next = item.clone();
+                next.id = format!("fixture-{n}");
+                next.preview = "Clipboard history performance fixture. ".repeat(28);
+                store.items.push(next);
+            }
+        }
+        let start = Instant::now();
+        for _ in 0..30 {
+            let _ = ctx.run(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(820., 620.))),
+                    ..Default::default()
+                },
+                |ctx| app.render(ctx),
+            );
+        }
+        println!(
+            "2000 metadata records, 30 frames: {} ms",
+            start.elapsed().as_millis()
+        );
+        println!(
+            "{}",
+            std::fs::read_to_string("/proc/self/status")
+                .unwrap()
+                .lines()
+                .filter(|l| l.starts_with("VmRSS:") || l.starts_with("VmHWM:"))
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+        drop(app);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn v200_row_activation_pastes_only_after_restore_and_keeps_identity() {
+        for image in [false, true] {
+            let (mut app, rx, root) = app();
+            let ctx = Context::default();
+            let item = if image {
+                saved_image(&mut app)
+            } else {
+                app.store.lock().unwrap().items[0].clone()
+            };
+            app.store.lock().unwrap().pin(&item.id).unwrap();
+            click_row(&mut app, &ctx, &item, pos2(80., 35.));
+            assert!(
+                matches!(restore_command(&rx,&app.store),Command::Restore(id,_) if id==item.id)
+            );
+            assert!(!app.hidden);
+            assert!(rx.try_recv().is_err());
+            app.store.lock().unwrap().touch(&item.id).unwrap();
+            app.handle_notice(&ctx, Notice::Activated(item.id.clone()));
+            assert!(app.hidden);
+            assert!(matches!(rx.try_recv().unwrap(), Command::Paste));
+            assert_eq!(app.selected.as_deref(), Some(item.id.as_str()));
+            assert!(app.store.lock().unwrap().items[0].pinned);
+            app.handle_notice(
+                &ctx,
+                Notice::PasteFeedback("Copied—press Ctrl+V to paste.".into()),
+            );
+            assert!(app.toast.as_ref().unwrap().0.contains("Ctrl+V"));
+            fs_remove(root);
+        }
+    }
+    fn fs_remove(root: PathBuf) {
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn v200_desktop_configured_is_never_reported_as_active() {
+        let (mut app, _rx, root) = app();
+        let ctx = Context::default();
+        app.handle_notice(&ctx, Notice::ShortcutConfigured("Super+V".into()));
+        assert!(app.active_shortcut.is_none());
+        assert_eq!(app.desktop_shortcut.as_deref(), Some("Super+V"));
+        assert!(app
+            .shortcut_feedback
+            .contains("not independently confirmed"));
+        fs_remove(root);
     }
 }

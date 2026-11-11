@@ -1,0 +1,41 @@
+name: Signed APT repository artifact
+on:
+  workflow_dispatch:
+    inputs:
+      deb_url:
+        description: Verified published ClipVault amd64 .deb URL
+        required: true
+      sha256:
+        description: Independently verified SHA256 of that package
+        required: true
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y apt-utils gnupg
+      - name: Fetch exact release artifact
+        env:
+          DEB_URL: ${{ inputs.deb_url }}
+          EXPECTED_SHA256: ${{ inputs.sha256 }}
+        run: |
+          [[ "$EXPECTED_SHA256" =~ ^[[:xdigit:]]{64}$ ]]
+          case "$DEB_URL" in https://github.com/Amibiplob/ClipVault/releases/download/*.deb) ;; *) exit 1;; esac
+          curl --fail --location --proto '=https' "$DEB_URL" --output clipvault.deb
+          printf '%s  clipvault.deb\n' "$EXPECTED_SHA256" | sha256sum --check
+      - name: Sign repository
+        env:
+          GNUPGHOME: ${{ runner.temp }}/clipvault-gnupg
+          SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+          SIGNING_FINGERPRINT: ${{ secrets.APT_SIGNING_FINGERPRINT }}
+        run: |
+          install -d -m 700 "$GNUPGHOME"
+          trap 'rm -rf "$GNUPGHOME"' EXIT
+          printf '%s' "$SIGNING_KEY" | gpg --batch --import
+          bash scripts/prepare-apt-repository.sh clipvault.deb target/apt-repository "$SIGNING_FINGERPRINT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-apt-repository
+          path: target/apt-repository/

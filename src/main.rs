@@ -1,6 +1,9 @@
 mod clipboard;
+mod desktop;
 mod fonts;
 mod icons;
+mod paste;
+mod restart;
 mod shortcut;
 mod storage;
 mod ui;
@@ -36,12 +39,16 @@ fn launch() -> Result<(), String> {
             .and_then(|i| args.get(i + 1))
             .map(PathBuf::from)
     };
+    if args.iter().any(|a| a == "--version") {
+        println!("ClipVault {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     if args.iter().any(|a| a == "--help") {
-        println!("ClipVault — private native clipboard history\n\n  --toggle              Toggle the running floating window\n  --background          Start with the window hidden\n  --autostart           Login launch; honor Start hidden\n  --screenshot FILE.png Draw 120 frames, save the window, and exit\n  --data-dir DIRECTORY  Use a separate local history directory\n  --diagnostics         Print desktop capability information\n\nUse Ctrl+V in your target app after selecting a history item.\nWayland: assign clipvault --toggle to Super+V in desktop shortcuts.");
+        println!("ClipVault — private native clipboard history\n\n  --toggle              Toggle the running floating window\n  --background          Start with the window hidden\n  --autostart           Login launch; honor Start hidden\n  --screenshot FILE.png Draw 120 frames, save the window, and exit\n  --data-dir DIRECTORY  Use a separate local history directory\n  --diagnostics         Print desktop capability information\n\nSelect a history item to attempt paste. If unavailable, press Ctrl+V in your target app.\nDesktop shortcut setup and status are in Settings → Shortcuts.");
         return Ok(());
     }
     if args.iter().any(|a| a == "--diagnostics") {
-        println!("Session: {}\nDisplay: {}\nWayland: {}\nClipboard: native X11 / Wayland ext or wlr data-control\nWayland shortcuts: compositor binding to clipvault --toggle\nGNOME Wayland: requires a data-control extension or X11 login",std::env::var("XDG_SESSION_TYPE").unwrap_or_default(),std::env::var("DISPLAY").unwrap_or_default(),std::env::var("WAYLAND_DISPLAY").unwrap_or_default());
+        println!("Session: {}\nDisplay: {}\nWayland: {}\nClipboard: native X11 / Wayland ext or wlr data-control\nWayland shortcuts: desktop integration where available; otherwise compositor binding to clipvault --toggle\nGNOME Wayland: requires a data-control extension or X11 login",std::env::var("XDG_SESSION_TYPE").unwrap_or_default(),std::env::var("DISPLAY").unwrap_or_default(),std::env::var("WAYLAND_DISPLAY").unwrap_or_default());
         return Ok(());
     }
     let shot = option("--screenshot");
@@ -122,13 +129,43 @@ fn launch() -> Result<(), String> {
         }
     });
     let store = Arc::new(Mutex::new(storage::Store::open(root)?));
-    let service = clipboard::start(store.clone());
+    let service = if shot.is_some() {
+        // Rendering screenshots must never register shortcuts or inspect the real clipboard.
+        let (tx, commands) = mpsc::channel();
+        let (out, rx) = mpsc::channel();
+        let _ = out.send(clipboard::Notice::Status(
+            "Screenshot mode · monitoring disabled".into(),
+        ));
+        std::thread::spawn(move || {
+            while let Ok(command) = commands.recv() {
+                if matches!(command, clipboard::Command::Stop) {
+                    break;
+                }
+            }
+        });
+        clipboard::Service { tx, rx }
+    } else {
+        clipboard::start(store.clone())
+    };
+    let _ = service.tx.send(clipboard::Command::RememberTarget);
     let settings = store.lock().unwrap().settings.clone();
-    let hidden = startup_hidden(&args, &settings) && shot.is_none();
+    let toggle_launch = args.iter().any(|a| a == "--toggle");
+    if toggle_launch {
+        let _ = service.tx.send(clipboard::Command::Toggle);
+    }
+    let hidden = (startup_hidden(&args, &settings) || toggle_launch) && shot.is_none();
     // eframe 0.31 unconditionally maps the first rendered root window. Do not
     // initialize it at all during silent startup: monitoring and IPC run alone.
     let service = if hidden {
-        wait_for_window(service, &ipr)?
+        match wait_for_window(service, &ipr) {
+            Ok(service) => service,
+            Err(_) if restart::requested() => {
+                let _ = fs::remove_file(&socket);
+                drop(lock);
+                return restart::exec_new();
+            }
+            Err(error) => return Err(error),
+        }
     } else {
         service
     };
@@ -143,8 +180,9 @@ fn launch() -> Result<(), String> {
             width: 256,
             height: 256,
         })
-        .with_inner_size(settings.window_size)
-        .with_min_inner_size([440., 420.])
+        .with_inner_size(settings.geometry().size)
+        .with_maximized(settings.geometry().maximized)
+        .with_min_inner_size([if settings.compact { 440. } else { 640. }, 420.])
         .with_clamp_size_to_monitor_size(true)
         .with_decorations(settings.system_title_bar)
         .with_resizable(true)
@@ -173,6 +211,9 @@ fn launch() -> Result<(), String> {
     .map_err(|e| e.to_string());
     let _ = fs::remove_file(socket);
     drop(lock);
+    if restart::requested() && r.is_ok() {
+        return restart::exec_new();
+    }
     r
 }
 
@@ -180,11 +221,43 @@ fn wait_for_window(
     service: clipboard::Service,
     ipc: &mpsc::Receiver<String>,
 ) -> Result<clipboard::Service, String> {
+    let updates = restart::watch();
     let mut pending = std::collections::VecDeque::new();
     let mut service_closed = false;
     loop {
+        let mut newer = false;
+        for version in updates.try_iter() {
+            if let Some(message) = version.strip_prefix("manual:") {
+                pending.push_back(clipboard::Notice::Error(message.into()));
+            } else if !version.is_empty() {
+                newer = true;
+            }
+        }
+        if newer {
+            let (tx, rx) = mpsc::channel();
+            if service.tx.send(clipboard::Command::Flush(tx)).is_ok()
+                && matches!(
+                    rx.recv_timeout(std::time::Duration::from_secs(3)),
+                    Ok(Ok(()))
+                )
+            {
+                let _ = service.tx.send(clipboard::Command::Stop);
+                restart::request();
+                return Err("Restarting into installed update".into());
+            }
+            pending.push_back(clipboard::Notice::Error(
+                "An update is installed; restart manually after resolving the storage error."
+                    .into(),
+            ));
+        }
         match ipc.recv_timeout(std::time::Duration::from_millis(40)) {
-            Ok(message) if matches!(message.as_str(), "show" | "toggle") => break,
+            Ok(message) if message == "toggle" => {
+                let _ = service.tx.send(clipboard::Command::Toggle);
+            }
+            Ok(message) if message == "show" => {
+                let _ = service.tx.send(clipboard::Command::RememberTarget);
+                break;
+            }
             Err(mpsc::RecvTimeoutError::Disconnected) if service_closed => {
                 return Err("Background services stopped".into())
             }

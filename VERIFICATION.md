@@ -1,3 +1,5 @@
+> Historical v1.0.0 verification record. For the current 2.0.0 implementation, checks, package paths and limitations, read [V2.0.0-VERIFICATION.md](V2.0.0-VERIFICATION.md).
+
 # Current feature update: 1.1.0
 
 See [FEATURE-VERIFICATION.md](FEATURE-VERIFICATION.md) for current feature tests and package results. The 1.0.0 evidence below is historical.

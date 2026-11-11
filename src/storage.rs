@@ -27,10 +27,89 @@ pub struct Item {
     pub time: i64,
     #[serde(default)]
     pub order: u64,
+    /// Original capture time is unknown for legacy records whose time was reused.
+    #[serde(default)]
+    pub captured_at: Option<i64>,
+    #[serde(default)]
+    pub last_used: Option<i64>,
     pub pinned: bool,
     pub formats: Vec<Format>,
     pub thumbnail: Option<String>,
     pub source: String,
+}
+impl Item {
+    pub fn recency(&self) -> i64 {
+        self.last_used.unwrap_or(self.time)
+    }
+    pub fn copied_label(&self) -> String {
+        self.captured_at
+            .map(|t| format!("Copied {}", relative_time(t)))
+            .unwrap_or_else(|| "Original capture time unavailable (legacy clip)".into())
+    }
+    pub fn exact_times(&self) -> String {
+        let local = |t| {
+            chrono::DateTime::from_timestamp(t, 0)
+                .map(|v| v.with_timezone(&chrono::Local).format("%c %Z").to_string())
+                .unwrap_or_else(|| "Unknown".into())
+        };
+        format!(
+            "{}\nLast used: {}",
+            self.captured_at
+                .map(|t| format!("Copied: {}", local(t)))
+                .unwrap_or_else(|| "Original capture time unavailable (legacy clip)".into()),
+            self.last_used
+                .map(local)
+                .unwrap_or_else(|| "Not recorded".into())
+        )
+    }
+}
+pub fn relative_time(time: i64) -> String {
+    let seconds = now().saturating_sub(time).max(0);
+    if seconds < 60 {
+        "Just now".into()
+    } else if seconds < 3600 {
+        format!(
+            "{} minute{} ago",
+            seconds / 60,
+            if seconds / 60 == 1 { "" } else { "s" }
+        )
+    } else if seconds < 86400 {
+        format!(
+            "{} hour{} ago",
+            seconds / 3600,
+            if seconds / 3600 == 1 { "" } else { "s" }
+        )
+    } else if seconds < 172800 {
+        "Yesterday".into()
+    } else {
+        format!("{} days ago", seconds / 86400)
+    }
+}
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+pub struct Geometry {
+    pub size: [f32; 2],
+    pub maximized: bool,
+}
+impl Settings {
+    pub fn geometry(&self) -> Geometry {
+        (if self.compact {
+            &self.compact_geometry
+        } else {
+            &self.comfortable_geometry
+        })
+        .clone()
+        .unwrap_or(Geometry {
+            size: self.window_size,
+            maximized: false,
+        })
+    }
+    pub fn set_geometry(&mut self, geometry: Geometry) {
+        if self.compact {
+            self.compact_geometry = Some(geometry);
+        } else {
+            self.comfortable_geometry = Some(geometry);
+        }
+    }
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -58,6 +137,12 @@ pub struct Settings {
     pub always_on_top: bool,
     pub window_size: [f32; 2],
     pub window_position: Option<[f32; 2]>,
+    pub compact_geometry: Option<Geometry>,
+    pub comfortable_geometry: Option<Geometry>,
+    pub divider: f32,
+    pub font_size: f32,
+    pub theme: String,
+    pub clear_on_reboot: bool,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -83,8 +168,14 @@ impl Default for Settings {
             hide_after_copy: false,
             compact: true,
             always_on_top: false,
-            window_size: [820., 620.],
+            window_size: [440., 540.],
             window_position: None,
+            compact_geometry: None,
+            comfortable_geometry: None,
+            divider: 0.44,
+            font_size: 14.,
+            theme: String::new(),
+            clear_on_reboot: false,
         }
     }
 }
@@ -207,6 +298,7 @@ pub struct Store {
     db: Database,
     pub items: Vec<Item>,
     pub settings: Settings,
+    pub revision: u64,
 }
 impl Store {
     pub fn open(root: PathBuf) -> Result<Self, String> {
@@ -214,14 +306,34 @@ impl Store {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
         let db = Database::open(&root.join("history.sqlite3"))?;
-        let items = db
-            .rows("SELECT json FROM history")?
-            .into_iter()
-            .map(|v| {
-                serde_json::from_str(&v)
-                    .map_err(|e| format!("History could not be read; no data was removed: {e}"))
-            })
-            .collect::<Result<Vec<Item>, String>>()?;
+        db.run(
+            "CREATE TABLE IF NOT EXISTS clip_search (id TEXT PRIMARY KEY, content TEXT NOT NULL)",
+        )?;
+        // Read migration input in bounded batches; retain summaries, not full text payloads.
+        let mut items = Vec::new();
+        let mut offset = 0;
+        loop {
+            let batch = db.rows(&format!(
+                "SELECT json FROM history ORDER BY id LIMIT 128 OFFSET {offset}"
+            ))?;
+            if batch.is_empty() {
+                break;
+            }
+            let mut search = String::new();
+            for value in batch {
+                let mut item: Item = serde_json::from_str(&value)
+                    .map_err(|e| format!("History could not be read; no data was removed: {e}"))?;
+                search.push_str(&format!(
+                    "INSERT OR IGNORE INTO clip_search VALUES ({},{});",
+                    quote(&item.id),
+                    quote(&format!("{} {}", item.title, item.preview).to_lowercase())
+                ));
+                item.preview = item.preview.chars().take(512).collect();
+                items.push(item);
+            }
+            db.transaction(&search)?;
+            offset += 128;
+        }
         let mut settings = match db.rows("SELECT json FROM settings WHERE id=1")?.first() {
             Some(v) => serde_json::from_str(v).map_err(|e| {
                 format!("Saved settings are unreadable; history has not been modified: {e}")
@@ -234,6 +346,21 @@ impl Store {
             settings.age_enabled = false;
             settings.days = 30;
         }
+        // Migrate the current mode's legacy geometry once; initialize the other independently.
+        if settings.compact_geometry.is_none() && settings.comfortable_geometry.is_none() {
+            settings.set_geometry(Geometry {
+                size: settings.window_size,
+                maximized: false,
+            });
+        }
+        settings.compact_geometry.get_or_insert(Geometry {
+            size: [440., 540.],
+            maximized: false,
+        });
+        settings.comfortable_geometry.get_or_insert(Geometry {
+            size: [780., 540.],
+            maximized: false,
+        });
         // Additive JSON fields retain the existing tables and payload paths.
         db.transaction("PRAGMA user_version=1;")?;
         let mut s = Self {
@@ -241,25 +368,83 @@ impl Store {
             db,
             items,
             settings,
+            revision: 0,
         };
+        if let Ok(boot) = fs::read_to_string("/proc/sys/kernel/random/boot_id") {
+            s.apply_boot_id(boot.trim())?;
+        }
         s.cleanup()?;
         s.sort();
         s.collect_orphans();
         Ok(s)
     }
+    pub fn apply_boot_id(&mut self, boot: &str) -> Result<(), String> {
+        if boot.is_empty() {
+            return Ok(());
+        }
+        self.db.run(
+            "CREATE TABLE IF NOT EXISTS runtime_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        )?;
+        let previous = self
+            .db
+            .rows("SELECT value FROM runtime_state WHERE key='boot'")?;
+        let clear = self.settings.clear_on_reboot && previous.first().is_some_and(|v| v != boot);
+        let ids: Vec<_> = self
+            .items
+            .iter()
+            .filter(|i| clear && !i.pinned)
+            .map(|i| i.id.clone())
+            .collect();
+        let deletes: String = ids
+            .iter()
+            .map(|id| {
+                format!(
+                    "DELETE FROM history WHERE id={}; DELETE FROM clip_search WHERE id={0};",
+                    quote(id)
+                )
+            })
+            .collect();
+        self.db.transaction(&format!(
+            "{}INSERT OR REPLACE INTO runtime_state VALUES ('boot',{});",
+            deletes,
+            quote(boot)
+        ))?;
+        self.revision = self.revision.wrapping_add(1);
+        self.items.retain(|i| !ids.contains(&i.id));
+        Ok(())
+    }
+    pub fn flush(&self) -> Result<(), String> {
+        self.db.run("PRAGMA wal_checkpoint(FULL)")
+    }
+    pub fn search_ids(&self, query: &str) -> Result<std::collections::HashSet<String>, String> {
+        let escaped = query
+            .to_lowercase()
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        Ok(self
+            .db
+            .rows(&format!(
+                "SELECT id FROM clip_search WHERE content LIKE {} ESCAPE '\\'",
+                quote(&format!("%{escaped}%"))
+            ))?
+            .into_iter()
+            .collect())
+    }
     pub fn sort(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
         self.items.sort_by(|a, b| {
-            b.time
-                .cmp(&a.time)
+            b.recency()
+                .cmp(&a.recency())
                 .then(b.order.cmp(&a.order))
                 .then(b.id.cmp(&a.id))
         });
     }
     fn save_item(&self, item: &Item) -> Result<(), String> {
-        self.db.run(&format!(
-            "INSERT OR REPLACE INTO history VALUES ({},{});",
-            quote(&item.id),
-            quote(&serde_json::to_string(item).unwrap())
+        self.db.transaction(&format!(
+            "INSERT OR REPLACE INTO history VALUES ({},{}); INSERT OR IGNORE INTO clip_search VALUES ({},{});",
+            quote(&item.id), quote(&serde_json::to_string(item).unwrap()),
+            quote(&item.id), quote(&format!("{} {}",item.title,item.preview).to_lowercase())
         ))
     }
     pub fn save_settings(&mut self) -> Result<(), String> {
@@ -269,13 +454,19 @@ impl Store {
         let ids = self.cleanup_ids(&self.settings);
         let deletes: String = ids
             .iter()
-            .map(|id| format!("DELETE FROM history WHERE id={};", quote(id)))
+            .map(|id| {
+                format!(
+                    "DELETE FROM history WHERE id={}; DELETE FROM clip_search WHERE id={0};",
+                    quote(id)
+                )
+            })
             .collect();
         self.db.transaction(&format!(
             "INSERT OR REPLACE INTO settings VALUES (1,{});{}",
             quote(&serde_json::to_string(&self.settings).unwrap()),
             deletes
         ))?;
+        self.revision = self.revision.wrapping_add(1);
         self.items.retain(|i| !ids.contains(&i.id));
         self.collect_orphans();
         Ok(())
@@ -391,13 +582,15 @@ impl Store {
                 .take(100)
                 .collect(),
         };
-        let item = Item {
+        let mut item = Item {
             id,
             hash,
             kind,
             title,
             preview: preview.chars().take(200000).collect(),
             time: now(),
+            captured_at: Some(now()),
+            last_used: None,
             order: self
                 .items
                 .iter()
@@ -423,6 +616,7 @@ impl Store {
             .and_then(|f| f.sync_all())
             .map_err(|e| e.to_string())?;
         self.save_item(&item)?;
+        item.preview = item.preview.chars().take(512).collect();
         self.items.push(item);
         self.sort();
         self.cleanup()?;
@@ -455,7 +649,7 @@ impl Store {
     pub fn touch(&mut self, id: &str) -> Result<(), String> {
         if let Some(i) = self.items.iter().position(|x| x.id == id) {
             let mut item = self.items[i].clone();
-            item.time = now();
+            item.last_used = Some(now());
             item.order = self
                 .items
                 .iter()
@@ -503,9 +697,15 @@ impl Store {
     fn remove_ids(&mut self, ids: &[String]) -> Result<(), String> {
         let sql: String = ids
             .iter()
-            .map(|id| format!("DELETE FROM history WHERE id={};", quote(id)))
+            .map(|id| {
+                format!(
+                    "DELETE FROM history WHERE id={}; DELETE FROM clip_search WHERE id={0};",
+                    quote(id)
+                )
+            })
             .collect();
         self.db.transaction(&sql)?;
+        self.revision = self.revision.wrapping_add(1);
         self.items.retain(|i| !ids.contains(&i.id));
         self.collect_orphans();
         Ok(())
@@ -522,8 +722,8 @@ impl Store {
     pub fn cleanup_ids(&self, settings: &Settings) -> Vec<String> {
         let mut items: Vec<_> = self.items.iter().filter(|i| !i.pinned).collect();
         items.sort_by(|a, b| {
-            b.time
-                .cmp(&a.time)
+            b.recency()
+                .cmp(&a.recency())
                 .then(b.order.cmp(&a.order))
                 .then(b.id.cmp(&a.id))
         });
@@ -534,7 +734,7 @@ impl Store {
                 (settings.count_enabled && *n >= settings.limit)
                     || (settings.age_enabled
                         && settings.days > 0
-                        && i.time < now() - settings.days * 86400)
+                        && i.recency() < now() - settings.days * 86400)
             })
             .map(|(_, i)| i.id.clone())
             .collect()
@@ -654,9 +854,15 @@ pub fn native_image(path: &Path) -> Result<image::DynamicImage, image::ImageErro
             let lib =
                 libloading::Library::new("libgdk_pixbuf-2.0.so.0").map_err(|e| e.to_string())?;
             let load: libloading::Symbol<
-                unsafe extern "C" fn(*const c_char, *mut *mut c_void) -> *mut c_void,
+                unsafe extern "C" fn(
+                    *const c_char,
+                    c_int,
+                    c_int,
+                    c_int,
+                    *mut *mut c_void,
+                ) -> *mut c_void,
             > = lib
-                .get(b"gdk_pixbuf_new_from_file\0")
+                .get(b"gdk_pixbuf_new_from_file_at_scale\0")
                 .map_err(|e| e.to_string())?;
             let get = |name: &[u8]| -> Result<
                 libloading::Symbol<unsafe extern "C" fn(*mut c_void) -> c_int>,
@@ -673,7 +879,7 @@ pub fn native_image(path: &Path) -> Result<image::DynamicImage, image::ImageErro
                 lib.get(b"g_object_unref\0").map_err(|e| e.to_string())?;
             let filename =
                 CString::new(path.as_os_str().as_encoded_bytes()).map_err(|e| e.to_string())?;
-            let pix = load(filename.as_ptr(), std::ptr::null_mut());
+            let pix = load(filename.as_ptr(), 1600, 1200, 1, std::ptr::null_mut());
             if pix.is_null() {
                 return Err("Image decoder unavailable".into());
             }
@@ -1231,6 +1437,126 @@ mod tests {
         assert!(!restarted.settings.system_title_bar);
         assert!(!restarted.settings.confirm_before_delete);
         assert_eq!(restarted.settings.changelog_dismissed_version, "1.2.0");
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn v200_reuse_preserves_capture_time_identity_and_pin() {
+        let mut s = store();
+        s.ingest(
+            &Snapshot::from([("text/plain".into(), b"Original".to_vec())]),
+            "test",
+        )
+        .unwrap();
+        let original = s.items[0].clone();
+        s.pin(&original.id).unwrap();
+        s.ingest(
+            &Snapshot::from([("text/plain".into(), b"Newer".to_vec())]),
+            "test",
+        )
+        .unwrap();
+        s.touch(&original.id).unwrap();
+        assert_eq!(s.items[0].id, original.id);
+        assert!(s.items[0].pinned);
+        assert_eq!(s.items[0].time, original.time);
+        assert_eq!(s.items[0].captured_at, original.captured_at);
+        assert!(s.items[0].last_used.is_some());
+        assert_eq!(s.items.len(), 2);
+        let path = s.root.clone();
+        drop(s);
+        let reopened = Store::open(path.clone()).unwrap();
+        assert_eq!(reopened.items[0].captured_at, original.captured_at);
+        assert!(reopened.items[0].last_used.is_some());
+        drop(reopened);
+        fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
+    fn v200_boot_cleanup_distinguishes_process_restart_and_unknown_boot() {
+        let mut s = store();
+        s.settings.age_enabled = false;
+        s.settings.count_enabled = false;
+        s.settings.clear_on_reboot = true;
+        s.ingest(
+            &Snapshot::from([("text/plain".into(), b"Keep pinned".to_vec())]),
+            "test",
+        )
+        .unwrap();
+        let pin = s.items[0].id.clone();
+        s.pin(&pin).unwrap();
+        s.ingest(
+            &Snapshot::from([("text/plain".into(), b"Unpinned".to_vec())]),
+            "test",
+        )
+        .unwrap();
+        s.db.run("DELETE FROM runtime_state").unwrap();
+        s.apply_boot_id("first-known-boot").unwrap();
+        assert_eq!(s.items.len(), 2);
+        s.apply_boot_id("first-known-boot").unwrap();
+        assert_eq!(s.items.len(), 2);
+        s.apply_boot_id("").unwrap();
+        assert_eq!(s.items.len(), 2);
+        s.apply_boot_id("actual-next-boot").unwrap();
+        assert_eq!(s.items.len(), 1);
+        assert_eq!(s.items[0].id, pin);
+        s.apply_boot_id("actual-next-boot").unwrap();
+        assert_eq!(s.items.len(), 1);
+        fs::remove_dir_all(&s.root).unwrap();
+    }
+    #[test]
+    fn v200_legacy_times_are_not_invented_and_deep_search_survives_summary_truncation() {
+        let mut s = store();
+        s.settings.age_enabled = false;
+        let text = format!("{} UniqueNeedle_% end", "x".repeat(18000));
+        s.ingest(
+            &Snapshot::from([("text/plain".into(), text.as_bytes().to_vec())]),
+            "test",
+        )
+        .unwrap();
+        let mut clip = s.items[0].clone();
+        assert!(clip.preview.len() <= 512);
+        assert!(s.search_ids("uniqueneedle_%").unwrap().contains(&clip.id));
+        clip.captured_at = None;
+        clip.last_used = None;
+        let saved_time = clip.time;
+        s.save_item(&clip).unwrap();
+        s.items[0] = clip.clone();
+        s.touch(&clip.id).unwrap();
+        assert_eq!(s.items[0].time, saved_time);
+        assert_eq!(s.items[0].captured_at, None);
+        assert!(s.items[0].copied_label().contains("unavailable"));
+        assert_eq!(s.full_text(&clip).unwrap(), text);
+        fs::remove_dir_all(&s.root).unwrap();
+    }
+    #[test]
+    fn v200_independent_geometry_and_new_preferences_survive_restart() {
+        let mut s = store();
+        s.settings.compact = true;
+        s.settings.set_geometry(Geometry {
+            size: [450., 550.],
+            maximized: false,
+        });
+        s.settings.compact = false;
+        s.settings.set_geometry(Geometry {
+            size: [850., 650.],
+            maximized: true,
+        });
+        s.settings.theme = "system".into();
+        s.settings.font_size = 20.;
+        s.settings.divider = 0.38;
+        s.settings.clear_on_reboot = true;
+        s.save_settings().unwrap();
+        let root = s.root.clone();
+        drop(s);
+        let mut s = Store::open(root.clone()).unwrap();
+        assert_eq!(s.settings.geometry().size, [850., 650.]);
+        assert!(s.settings.geometry().maximized);
+        s.settings.compact = true;
+        assert_eq!(s.settings.geometry().size, [450., 550.]);
+        assert!(!s.settings.geometry().maximized);
+        assert_eq!(s.settings.theme, "system");
+        assert_eq!(s.settings.font_size, 20.);
+        assert_eq!(s.settings.divider, 0.38);
+        assert!(s.settings.clear_on_reboot);
+        drop(s);
         fs::remove_dir_all(root).unwrap();
     }
 }

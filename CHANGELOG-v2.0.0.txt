@@ -1,0 +1,13 @@
+ClipVault 2.0.0
+
+Select a clip to restore its saved formats, hide history and attempt automatic paste on X11. If focus or paste is unavailable, the clip stays copied: press Ctrl+V in your app.
+
+Desktop-managed shortcuts on Cinnamon, GNOME and MATE. Clear registration status and safe replacement. Other desktops have setup instructions with the exact command.
+
+Compact and Comfortable remember separate window sizes and maximized state. Comfortable has a draggable divider. Choose System, Light or Dark and adjust font size.
+
+Capture time and last-used time are separate. Legacy original times that were not retained cannot be recovered. Editing always preserves the original. Optional reboot cleanup protects pins and detects actual boot changes.
+
+Refreshed settings, local privacy controls, compatibility documentation and accessible website. Package-manager replacement detection is separate from optional GitHub update checks.
+
+See V2.0.0-VERIFICATION.md for measured performance and desktop testing limitations.

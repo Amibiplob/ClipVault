@@ -81,7 +81,8 @@ let c=Connection::connect_to_env().map_err(|e|e.to_string())?;let mut q=c.new_ev
 if s.device.is_none(){return Err("No Wayland clipboard seat is available".into())}
 let _=out.send(Notice::Status("Wayland · monitoring clipboard. Bind your desktop shortcut to clipvault --toggle.".into()));let own_mime=format!("application/x-clipvault-owned-{}",std::process::id());
 loop{
- while let Ok(cmd)=rx.try_recv(){match cmd{Command::Stop=>return Ok(()),Command::RecordShortcut(_)=>{let _=out.send(Notice::ShortcutFailed("Direct global shortcuts are unavailable on Wayland. Configure your desktop shortcut to run clipvault --toggle; the previous setting is unchanged.".into()));},Command::Restore(id,data)=>{
+ while let Ok(cmd)=rx.try_recv(){let Some(cmd)=crate::clipboard::resolve_restore(cmd,&store,&out)else{continue;};match cmd{Command::Flush(reply)=>{let _=reply.send(store.lock().unwrap().flush());},Command::RestoreItem(_)=>unreachable!("resolved above"),Command::Stop=>return Ok(()),
+Command::SetShortcut(_)=>{},Command::RememberTarget=>{},Command::Toggle=>{let _=out.send(Notice::Open);},Command::Paste=>{let _=out.send(Notice::PasteFeedback("Copied—press Ctrl+V to paste.".into()));},Command::RecordShortcut(_)=>{let _=out.send(Notice::ShortcutFailed("Direct global shortcuts are unavailable on Wayland. Configure your desktop shortcut to run clipvault --toggle; the previous setting is unchanged.".into()));},Command::Restore(id,data)=>{
  if data.is_empty(){let _=out.send(Notice::ActivationFailed(id,"The saved clip has no readable clipboard formats".into()));continue;}
  let data=Arc::new(crate::clipboard::compatible_text(data));
  let src=s.manager.as_ref().unwrap().create_data_source(&h,data.clone());

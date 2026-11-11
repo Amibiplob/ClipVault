@@ -18,7 +18,7 @@
   <screenshots>
     <screenshot type="default">
       <caption>Clipboard history with search and clip preview</caption>
-      <image type="source" width="820" height="620">https://raw.githubusercontent.com/Amibiplob/ClipVault/main/docs/history.png</image>
+      <image type="source" width="440" height="540">https://raw.githubusercontent.com/Amibiplob/ClipVault/main/docs/history.png</image>
     </screenshot>
   </screenshots>
   <categories>
@@ -26,6 +26,7 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="2.0.0" date="2026-11-11"><description><p>Automatic paste attempts with safe fallback, desktop shortcut integration, independent layouts, original and last-used timestamps, optional reboot cleanup, and a refreshed accessible website. Existing history and pins are preserved. See compatibility and verification notes for testing limits.</p></description></release>
     <release version="1.2.0" date="2026-11-10"><description><p>Native or custom window controls, installed app fonts, clean Compact and Comfortable layouts, silent login startup, consistent delete confirmation, and an offline changelog. Existing clipboard history and settings are preserved.</p></description></release>
     <release version="1.1.0" date="2026-11-08" />
   </releases>

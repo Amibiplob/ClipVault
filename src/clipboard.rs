@@ -20,12 +20,20 @@ use x11rb::{
 
 pub enum Command {
     Restore(String, Snapshot),
+    RestoreItem(String),
+    Toggle,
+    RememberTarget,
+    Paste,
     RecordShortcut(bool),
+    SetShortcut(String),
+    Flush(Sender<Result<(), String>>),
     Stop,
 }
 #[derive(Debug)]
 pub enum Notice {
     Changed,
+    PasteFeedback(String),
+    ShortcutConfigured(String),
     Open,
     Activated(String),
     ActivationFailed(String, String),
@@ -51,7 +59,7 @@ pub fn start(store: Shared) -> Service {
     let (out, events) = mpsc::channel();
     std::thread::spawn(move || {
         let result = if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-            crate::wayland::run(store, rx, out.clone())
+            run_wayland_service(store, rx, out.clone())
         } else {
             run_x11(store, rx, out.clone())
         };
@@ -60,6 +68,154 @@ pub fn start(store: Shared) -> Service {
         }
     });
     Service { tx, rx: events }
+}
+fn run_wayland_service(
+    store: Shared,
+    commands: Receiver<Command>,
+    out: Sender<Notice>,
+) -> Result<(), String> {
+    let desktop = crate::desktop::Integration::new(store.lock().unwrap().root.clone());
+    let shortcut = store.lock().unwrap().settings.shortcut.clone();
+    match desktop.register(&shortcut) {
+        Ok(()) => {
+            let _ = out.send(Notice::ShortcutConfigured(shortcut));
+        }
+        Err(e) => {
+            let _ = out.send(Notice::ShortcutFailed(e));
+        }
+    }
+    let (tx, rx) = mpsc::channel();
+    let capture_store = store.clone();
+    let capture_out = out.clone();
+    std::thread::spawn(move || {
+        if let Err(e) = crate::wayland::run(capture_store, rx, capture_out.clone()) {
+            let _ = capture_out.send(Notice::Error(e));
+        }
+    });
+    let mut recording = false;
+    let desktop_events = desktop.watch();
+    loop {
+        match commands.recv_timeout(Duration::from_millis(100)) {
+            Ok(Command::Flush(reply)) => {
+                let _ = reply.send(store.lock().unwrap().flush());
+            }
+            Ok(Command::Stop) => {
+                let _ = tx.send(Command::Stop);
+                return Ok(());
+            }
+            Ok(Command::Toggle) if !recording => {
+                let _ = out.send(Notice::Open);
+            }
+            Ok(Command::Toggle | Command::RememberTarget) => {}
+            Ok(Command::Paste) => {
+                let _ = out.send(Notice::PasteFeedback(
+                    "Copied—press Ctrl+V to paste.".into(),
+                ));
+            }
+            Ok(Command::RecordShortcut(start)) => {
+                if start {
+                    match desktop.suspend() {
+                        Ok(()) => {
+                            recording = true;
+                            let _ = out.send(Notice::RecordingReady);
+                        }
+                        Err(e) => {
+                            let _ = out.send(Notice::ShortcutFailed(e));
+                        }
+                    }
+                } else {
+                    recording = false;
+                    let old = store.lock().unwrap().settings.shortcut.clone();
+                    match desktop.register(&old) {
+                        Ok(()) => {
+                            let _ = out.send(Notice::ShortcutConfigured(old));
+                            let _ = out.send(Notice::RecordingCancelled);
+                        }
+                        Err(e) => {
+                            let _ = out.send(Notice::ShortcutFailed(e));
+                        }
+                    }
+                }
+            }
+            Ok(Command::SetShortcut(next)) => {
+                recording = false;
+                let old = store.lock().unwrap().settings.shortcut.clone();
+                match change_binding(
+                    &old,
+                    &next,
+                    |s| desktop.register(s),
+                    |next| {
+                        let mut s = store.lock().unwrap();
+                        s.settings.shortcut = next.into();
+                        let result = s.save_settings();
+                        if result.is_err() {
+                            s.settings.shortcut = old.clone();
+                        }
+                        result
+                    },
+                ) {
+                    Ok(()) => {
+                        let _ = out.send(Notice::ShortcutConfigured(next));
+                    }
+                    Err((e, restored)) => {
+                        if restored {
+                            let _ = out.send(Notice::ShortcutConfigured(old));
+                        }
+                        let _ = out.send(Notice::ShortcutFailed(e));
+                    }
+                }
+            }
+            Ok(command @ (Command::Restore(..) | Command::RestoreItem(..))) => {
+                if let Err(error) = tx.send(command) {
+                    if let Command::Restore(id, _) | Command::RestoreItem(id) = error.0 {
+                        let _=out.send(Notice::ActivationFailed(id,"Clipboard unavailable on this compositor. See Privacy and Shortcuts for supported capabilities.".into()));
+                    }
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        if !recording && desktop_events.try_iter().next().is_some() {
+            if let Ok(Some(next)) = desktop.read() {
+                let mut s = store.lock().unwrap();
+                if s.settings.shortcut != next {
+                    s.settings.shortcut = next.clone();
+                    if let Err(e) = s.save_settings() {
+                        let _ = out.send(Notice::Error(e));
+                    }
+                }
+                let _ = out.send(Notice::ShortcutConfigured(next));
+            } else {
+                let _ = out.send(Notice::ShortcutInactive);
+            }
+        }
+    }
+}
+/// Resolve disk payloads on the clipboard worker, never on the UI thread.
+pub fn resolve_restore(command: Command, store: &Shared, out: &Sender<Notice>) -> Option<Command> {
+    if let Command::RestoreItem(id) = command {
+        let data = {
+            let store = store.lock().unwrap();
+            store
+                .items
+                .iter()
+                .find(|item| item.id == id)
+                .ok_or_else(|| "This clip is no longer in history".to_owned())
+                .and_then(|item| store.snapshot(item))
+        };
+        match data {
+            Ok(data) => Some(Command::Restore(id, data)),
+            Err(e) => {
+                let _ = out.send(Notice::ActivationFailed(
+                    id,
+                    format!("Could not read the saved clip: {e}"),
+                ));
+                None
+            }
+        }
+    } else {
+        Some(command)
+    }
 }
 pub fn compatible_text(mut data: Snapshot) -> Snapshot {
     if let Some(bytes) = data
@@ -125,9 +281,12 @@ struct X11 {
     owned: Snapshot,
     transfers: HashMap<(Window, Atom), Transfer>,
     key: Option<(u8, ModMask)>,
+    desktop: Option<crate::desktop::Integration>,
     out: Sender<Notice>,
     press_gate: crate::shortcut::PressGate,
     repeat_supported: bool,
+    desktop_gate: crate::shortcut::PressGate,
+    desktop_code: Option<u8>,
     recorder: crate::shortcut::Recorder,
     recording_keys: std::collections::HashSet<u8>,
     recorded_result: Option<crate::shortcut::Result>,
@@ -136,6 +295,7 @@ fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 fn parse_shortcut(shortcut: &str) -> Result<(u32, ModMask), String> {
+    crate::desktop::accelerator(shortcut)?;
     let parts: Vec<_> = shortcut.split('+').map(str::trim).collect();
     let key = parts.last().ok_or("Choose a shortcut")?;
     let ch = key
@@ -211,6 +371,24 @@ impl X11 {
                 | SelectionEventMask::SELECTION_CLIENT_CLOSE,
         )
         .map_err(err)?;
+        // Observe release edges even when the desktop owns the passive shortcut grab.
+        use x11rb::protocol::xinput::{ConnectionExt as _, EventMask as XIEvents, XIEventMask};
+        if c.xinput_xi_query_version(2, 0)
+            .ok()
+            .and_then(|v| v.reply().ok())
+            .is_some()
+        {
+            let _ = c
+                .xinput_xi_select_events(
+                    c.setup().roots[screen].root,
+                    &[XIEvents {
+                        deviceid: 1,
+                        mask: vec![XIEventMask::RAW_KEY_RELEASE],
+                    }],
+                )
+                .ok()
+                .and_then(|v| v.check().ok());
+        }
         c.flush().map_err(err)?;
         // Detectable repeat produces one real release, rather than synthetic
         // release/press pairs while held. Never enable an unreliable binding.
@@ -246,8 +424,11 @@ impl X11 {
             owned: Snapshot::new(),
             transfers: HashMap::new(),
             key: None,
+            desktop: None,
             press_gate: Default::default(),
             repeat_supported,
+            desktop_gate: Default::default(),
+            desktop_code: None,
             recorder: Default::default(),
             recording_keys: Default::default(),
             recorded_result: None,
@@ -255,6 +436,20 @@ impl X11 {
         })
     }
     fn bind(&mut self, shortcut: &str) -> Result<(), String> {
+        if let Some(desktop) = self.desktop.clone() {
+            if desktop.automatic() {
+                if desktop.read()?.as_deref() == Some(shortcut) {
+                    return Ok(());
+                }
+                self.bind_native(shortcut)?;
+                let result = desktop.register(shortcut);
+                self.unbind();
+                return result;
+            }
+        }
+        self.bind_native(shortcut)
+    }
+    fn bind_native(&mut self, shortcut: &str) -> Result<(), String> {
         if !self.repeat_supported {
             return Err("Reliable X11 global shortcuts are unavailable. Configure your desktop to run clipvault --toggle.".into());
         }
@@ -291,12 +486,12 @@ impl X11 {
                 .grab_key(false, root, mask, code, GrabMode::ASYNC, GrabMode::ASYNC)
                 .map_err(err)
                 .and_then(|cookie| cookie.check().map_err(err));
-            if let Err(e) = result {
+            if result.is_err() {
                 for mask in grabbed {
                     let _ = self.c.ungrab_key(code, root, mask);
                 }
                 let _ = self.c.flush();
-                return Err(format!("{shortcut} could not be registered; another application or desktop shortcut may already use it. Choose another combination. ({e})"));
+                return Err(crate::desktop::unavailable(shortcut));
             }
             grabbed.push(mask);
         }
@@ -342,6 +537,9 @@ impl X11 {
     fn begin_recording(&mut self) -> Result<(), String> {
         if !self.repeat_supported {
             return Err("Native recording is unavailable on this X11 server. Configure a desktop shortcut for clipvault --toggle.".into());
+        }
+        if let Some(desktop) = &self.desktop {
+            desktop.suspend()?;
         }
         self.unbind();
         let reply = self
@@ -459,6 +657,12 @@ impl X11 {
             return;
         }
         match e {
+            Event::XinputRawKeyRelease(event) => {
+                if self.desktop_code == u8::try_from(event.detail).ok() {
+                    self.desktop_gate.release();
+                    self.desktop_code = None;
+                }
+            }
             Event::SelectionRequest(r) => {
                 let prop = if r.property == 0 {
                     r.target
@@ -782,10 +986,22 @@ fn complete_restore(
         }
     }
 }
+fn shortcut_status(x: &X11, shortcut: String) -> Notice {
+    if x.desktop.as_ref().is_some_and(|d| d.automatic()) {
+        Notice::ShortcutConfigured(shortcut)
+    } else {
+        Notice::ShortcutActive(shortcut)
+    }
+}
 fn restore_shortcut(x: &mut X11, store: &Shared, out: &Sender<Notice>, feedback: Notice) {
     let shortcut = store.lock().unwrap().settings.shortcut.clone();
     let result = x.bind(&shortcut);
-    complete_restore(out, shortcut, result, feedback);
+    if result.is_ok() && x.desktop.as_ref().is_some_and(|d| d.automatic()) {
+        let _ = out.send(shortcut_status(x, shortcut));
+        let _ = out.send(feedback);
+    } else {
+        complete_restore(out, shortcut, result, feedback);
+    }
 }
 /// Register before persisting, and restore the prior binding on either failure.
 /// The bool on an error says whether restoration was confirmed, never guessed.
@@ -797,7 +1013,7 @@ fn change_binding(
 ) -> Result<(), (String, bool)> {
     if let Err(error) = bind(next).and_then(|_| save(next)) {
         return match bind(old) {
-            Ok(()) => Err((format!("{error} Previous shortcut retained."), true)),
+            Ok(()) => Err((format!("{error} This shortcut is unavailable. Your current shortcut, {old}, is still active."), true)),
             Err(restore) => Err((format!("{error} Previous shortcut could not be restored: {restore}. Use desktop setup."), false)),
         };
     }
@@ -822,10 +1038,14 @@ fn apply_shortcut(x: &mut X11, store: &Shared, out: &Sender<Notice>, shortcut: &
     match result {
         Ok(()) => {
             let _ = out.send(Notice::ShortcutApplied(shortcut.into()));
+            let _ = out.send(shortcut_status(x, shortcut.into()));
         }
-        Err((error, restored)) => {
+        Err((mut error, restored)) => {
+            if x.desktop.as_ref().is_some_and(|d| d.automatic()) {
+                error = error.replace(" is still active.", " is still configured.");
+            }
             let _ = out.send(if restored {
-                Notice::ShortcutActive(old)
+                shortcut_status(x, old)
             } else {
                 Notice::ShortcutInactive
             });
@@ -848,11 +1068,17 @@ fn finish_recording(x: &mut X11, store: &Shared, out: &Sender<Notice>) {
 }
 pub fn run_x11(store: Shared, rx: Receiver<Command>, out: Sender<Notice>) -> Result<(), String> {
     let mut x = X11::new(out.clone())?;
+    x.desktop = Some(crate::desktop::Integration::new(
+        store.lock().unwrap().root.clone(),
+    ));
+    let mut paste = crate::paste::Controller::new().ok();
+    let desktop_events = x.desktop.as_ref().map(|desktop| desktop.watch());
+
     let shortcut = store.lock().unwrap().settings.shortcut.clone();
     let _ = out.send(Notice::Status("X11 · monitoring clipboard".into()));
     match x.bind(&shortcut) {
         Ok(()) => {
-            let _ = out.send(Notice::ShortcutActive(shortcut));
+            let _ = out.send(shortcut_status(&x, shortcut));
         }
         Err(e) => {
             let _ = out.send(Notice::ShortcutFailed(e));
@@ -863,9 +1089,72 @@ pub fn run_x11(store: Shared, rx: Receiver<Command>, out: Sender<Notice>) -> Res
     let mut last_owner = 0;
     loop {
         finish_recording(&mut x, &store, &out);
+        while let Some(e) = x.c.poll_for_event().map_err(err)? {
+            if matches!(&e,Event::XfixesSelectionNotify(n) if n.selection==x.clipboard&&n.owner!=x.win&&n.owner!=0)
+            {
+                dirty = true;
+            }
+            if matches!(&e, Event::KeyPress(_)) && !x.recorder.recording {
+                if let Some(p) = &mut paste {
+                    p.freeze();
+                }
+            }
+            x.serve(e);
+        }
         while let Ok(cmd) = rx.try_recv() {
+            let Some(cmd) = resolve_restore(cmd, &store, &out) else {
+                continue;
+            };
             match cmd {
+                Command::Flush(reply) => {
+                    let _ = reply.send(store.lock().unwrap().flush());
+                }
                 Command::Stop => return Ok(()),
+                Command::RestoreItem(_) => unreachable!("resolved above"),
+                Command::SetShortcut(next) => apply_shortcut(&mut x, &store, &out, &next),
+                Command::RememberTarget => {
+                    if let Some(p) = &mut paste {
+                        p.freeze();
+                    }
+                }
+                Command::Paste => {
+                    if let Some(p) = &mut paste {
+                        p.begin();
+                    } else {
+                        let _ = out.send(Notice::PasteFeedback(
+                            "Copied—press Ctrl+V to paste.".into(),
+                        ));
+                    }
+                }
+                Command::Toggle => {
+                    if x.recorder.recording {
+                        continue;
+                    }
+                    let shortcut = store.lock().unwrap().settings.shortcut.clone();
+                    let symbol = parse_shortcut(&shortcut).ok().map(|(symbol, _)| symbol);
+                    let setup = x.c.setup();
+                    x.desktop_code = symbol.and_then(|symbol| {
+                        x.c.get_keyboard_mapping(
+                            setup.min_keycode,
+                            setup.max_keycode - setup.min_keycode + 1,
+                        )
+                        .ok()?
+                        .reply()
+                        .ok()
+                        .and_then(|m| {
+                            m.keysyms
+                                .chunks(m.keysyms_per_keycode as usize)
+                                .position(|v| v.contains(&symbol))
+                                .map(|n| setup.min_keycode + n as u8)
+                        })
+                    });
+                    if x.desktop_gate.press() {
+                        if let Some(p) = &mut paste {
+                            p.freeze();
+                        }
+                        let _ = out.send(Notice::Open);
+                    }
+                }
                 Command::Restore(id, data) => {
                     match x.restore(data) {
                         Ok(()) => {
@@ -899,16 +1188,53 @@ pub fn run_x11(store: Shared, rx: Receiver<Command>, out: Sender<Notice>) -> Res
                 }
             }
         }
-        while let Some(e) = x.c.poll_for_event().map_err(err)? {
-            if matches!(&e,Event::XfixesSelectionNotify(n) if n.selection==x.clipboard&&n.owner!=x.win&&n.owner!=0)
-            {
-                dirty = true;
-            }
-            x.serve(e);
-        }
         finish_recording(&mut x, &store, &out);
-        if last_poll.elapsed() > Duration::from_millis(250) {
+        if let Some(p) = &mut paste {
+            if let Some(notice) = p.tick() {
+                let _ = out.send(notice);
+            }
+        }
+        if let Some(code) = x.desktop_code {
+            if x.c
+                .query_keymap()
+                .ok()
+                .and_then(|v| v.reply().ok())
+                .is_some_and(|r| r.keys[code as usize / 8] & (1 << (code % 8)) == 0)
+            {
+                x.desktop_gate.release();
+                x.desktop_code = None;
+            }
+        }
+        if !x.recorder.recording
+            && desktop_events
+                .as_ref()
+                .is_some_and(|events| events.try_iter().next().is_some())
+        {
+            if let Some(d) = &x.desktop {
+                if d.automatic() {
+                    match d.read() {
+                        Ok(Some(s)) => {
+                            let mut store = store.lock().unwrap();
+                            if store.settings.shortcut != s {
+                                store.settings.shortcut = s.clone();
+                                if let Err(e) = store.save_settings() {
+                                    let _ = out.send(Notice::Error(e));
+                                }
+                            }
+                            let _ = out.send(Notice::ShortcutConfigured(s));
+                        }
+                        _ => {
+                            let _ = out.send(Notice::ShortcutInactive);
+                        }
+                    }
+                }
+            }
+        }
+        if dirty || last_poll.elapsed() > Duration::from_millis(250) {
             last_poll = Instant::now();
+            if let Some(p) = &mut paste {
+                p.observe();
+            }
             let owner =
                 x.c.get_selection_owner(x.clipboard)
                     .map_err(err)?
@@ -942,6 +1268,7 @@ pub fn run_x11(store: Shared, rx: Receiver<Command>, out: Sender<Notice>) -> Res
                                     .map_err(err)?
                                     .owner
                                     == owner
+                                    && compatible_text(data.clone()) != x.owned
                                 {
                                     record(&store, data, &source, &out);
                                 }
@@ -956,7 +1283,7 @@ pub fn run_x11(store: Shared, rx: Receiver<Command>, out: Sender<Notice>) -> Res
             x.transfers
                 .retain(|_, t| t.touched.elapsed() < Duration::from_secs(20));
         }
-        std::thread::sleep(Duration::from_millis(12));
+        std::thread::sleep(Duration::from_millis(40));
     }
 }
 
