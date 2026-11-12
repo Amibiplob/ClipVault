@@ -1,20 +1,22 @@
-# Linux packaging — ClipVault 2.0.0
+# Linux packaging — ClipVault 2.1.0
 
-Build on Linux Mint 22.x / Ubuntu 24.04 x86-64 (glibc 2.39). AppImage still requires host glibc and graphics drivers; older systems need a separately verified build baseline. Package formats do not establish desktop compatibility. See [compatibility](../COMPATIBILITY.md) and the [release verification record](../V2.0.0-VERIFICATION.md).
+Run from the repository root (`app/` here). Debian/AppImage builds target Ubuntu
+24.04 / Mint 22.x x86-64, glibc 2.39. AppImage still needs compatible host glibc
+and graphics drivers. Fedora RPMs compile separately against Fedora; they never
+convert a Debian package or reuse its bundled libraries. See
+[current verification](../V2.1.0-VERIFICATION.md) and
+[desktop compatibility](../COMPATIBILITY.md) for measured limits.
 
-## Prerequisites and local commands
+## Debian and AppImage
 
-On a disposable build host with network access:
+On a disposable Noble build host, install `build-essential pkg-config binutils
+ dpkg-dev python3 curl desktop-file-utils appstream patchelf` and the runtime
+packages listed in Cargo.toml (`package.metadata.deb.depends`), plus
+`libgdk-pixbuf2.0-bin webp-pixbuf-loader fontconfig`. Use Rust >=1.88.
 
 ```sh
-sudo apt install build-essential pkg-config binutils dpkg-dev python3 curl \
-  desktop-file-utils appstream libsqlite3-0 libgdk-pixbuf-2.0-0 \
-  libgdk-pixbuf2.0-bin webp-pixbuf-loader libx11-6 libx11-xcb1 \
-  libxcursor1 libxi6 libxrandr2 libxinerama1 libxrender1 libxfixes3 \
-  libxext6 libxkbcommon0 libxkbcommon-x11-0 libxcb1 libwayland-client0 \
-  libwayland-cursor0 libwayland-egl1 libgl1 libegl1 fontconfig patchelf rpm
 cargo fetch --locked
-bash scripts/install-packaging-tools.sh
+bash scripts/install-packaging-tools.sh # network; only when tools are missing
 cargo test --locked --offline
 cargo clippy --locked --offline --all-targets -- -D warnings
 cargo fmt -- --check
@@ -22,25 +24,91 @@ python3 scripts/packaging-support.py notices
 python3 scripts/extract-cached-runtime.py
 LDAI_RUNTIME_FILE="$PWD/target/packaging-tools/runtime-x86_64" bash scripts/package-linux.sh all
 bash scripts/test-linux-packages.sh
-bash scripts/package-rpm.sh
 ```
 
-`package-linux.sh all` builds Debian and AppImage; individual modes are `deb`, `appimage`, `stage`. `package-rpm.sh` uses the same source assets and binary through `packaging/linux/clipvault.spec`; it fails clearly if rpmbuild is unavailable. RPM does not bundle the AppImage's Ubuntu runtime libraries. RPM dependencies and installation require Fedora/openSUSE-family acceptance. No local RPM is claimed unless an actual file was produced.
+The existing workflows build real release executables and create:
 
-Expected generated filenames (existence is recorded in verification, not implied here):
+- `dist/clipvault_2.1.0-1_amd64.deb`
+- `dist/ClipVault-2.1.0-x86_64.AppImage`
 
-- `dist/clipvault_2.0.0-1_amd64.deb`
-- `dist/ClipVault-2.0.0-x86_64.AppImage`
-- RPM tool output: `dist/clipvault-2.0.0-1*.x86_64.rpm` (distribution suffix depends on rpmbuild).
+`package-linux.sh` accepts `all`, `deb`, `appimage`, `stage`. Smoke checks inspect
+metadata, version, x86-64 ELF, runtime libraries, loaders, icons and notices.
+`--gui` additionally attempts isolated screenshot launches on a usable desktop.
+Extraction tests do not prove apt installation or FUSE. SHA256SUMS also includes
+historical packages; use the exact intended filename.
 
-The scripts derive versions from Cargo.toml; metadata, changelog and website config are checked separately. SHA256SUMS includes existing historical .deb/AppImage archives too; verify intended filenames and version rather than treating every dist file as current. `scripts/test-linux-packages.sh` checks archives/extracted AppDir, dynamic libraries, help/diagnostics, SQLite and image loaders; `--gui` additionally needs a usable desktop. These are not package-manager installation or FUSE acceptance.
+Install with `sudo apt install ./clipvault_2.1.0-1_amd64.deb`. For AppImage, run
+`chmod +x ClipVault-2.1.0-x86_64.AppImage` then
+`./ClipVault-2.1.0-x86_64.AppImage`. If FUSE is unavailable, use
+`./ClipVault-2.1.0-x86_64.AppImage --appimage-extract-and-run`.
+Keep a stable executable location before configuring shortcuts/startup;
+`bash scripts/install-appimage.sh` can install a user menu launcher.
 
-The existing source SVG is installed as scalable icon with matching PNG sizes and native window icon; desktop `Icon=clipvault` and `StartupWMClass=clipvault` match the application. Source/bundled dependency notices are retained. Uninstall scripts update caches and do not remove user data. Login startup and desktop shortcuts use the stable installed/AppImage executable and preserve `--data-dir`.
+## Fedora RPM
 
-## Release automation and publication
+The existing spec now compiles vendored source, runs tests and installs the shared
+Cargo manifest asset list with `scripts/install-release-assets.py`. It includes
+all logo sizes, launcher, AppStream metadata, notices and explicit dlopen library
+dependencies; ELF scanning adds linked-library requirements from the actual
+Fedora binary. Release is exactly `1`, without a distribution suffix.
 
-`.github/workflows/packages.yml` builds candidate artifacts manually on Ubuntu 24.04, with Debian/AppImage and RPM recipes, automated tests and archive smoke checks. It is prepared, not executed here. It does not upload a GitHub Release or publish a repository. Installed upgrade, removal, desktop keyboard/focus and image-paste tests are required before advertising tested platforms.
+On a host with Podman or Docker and network access:
 
-For system update-manager delivery, use the [signed APT preparation guide](APT-REPOSITORY.md). Signing/hosting credentials, publication and clean-system verification remain maintainer steps. There is no live repository or PPA claim.
+```sh
+bash scripts/package-rpm.sh container --online
+```
 
-GitHub Pages deployment uses `.github/workflows/pages.yml` with `docs/` as artifact root. Enable GitHub Pages with the GitHub Actions source in repository settings, then run/observe deployment. No remote settings or hosting were changed by this task. The website discovers actual released assets through GitHub; if the API fails, it links to Releases.
+This provisions `packaging/fedora/Containerfile` (Fedora 44), prepares the complete
+vendor archive, then builds/tests with container networking disabled. Set
+`CONTAINER_ENGINE=podman` or `docker` to select an engine. Pin the base image to a
+reviewed digest with `FEDORA_IMAGE=fedora@sha256:...` and record toolchain/system-package versions for reproducibility;
+mutable image tags alone do not guarantee identical package bytes.
+
+The native mode requires Fedora x86-64 and a prepared source archive:
+`python3 scripts/prepare-source.py --online`, then
+`bash scripts/package-rpm.sh native`. Its installation test deliberately requires
+a disposable container. `scripts/test-rpm.sh` checks metadata, file list,
+dependencies, installation without `--nodeps`, version, isolated Xvfb/software
+screenshot launch and uninstall retaining fixture history. This does not prove
+real desktop capture/paste/shortcuts or an installed v2.0 upgrade.
+
+Expected output only after success: `dist/clipvault-2.1.0-1.x86_64.rpm`.
+Install a verified Fedora package with
+`sudo dnf install ./clipvault-2.1.0-1.x86_64.rpm`.
+No RPM was produced here: rpmbuild, Podman/Docker and registry DNS are unavailable.
+Fedora installation/launch tests remain unrun. Other RPM distributions, including
+openSUSE, require separate dependency specs, builds and tests.
+
+## Source PPA / APT publication
+
+The new `debian/` recipe targets Noble/Mint 22.x amd64 with Ubuntu's versioned
+Rust/Cargo 1.89 and offline Cargo vendoring. See
+[Launchpad source packaging and account setup](LAUNCHPAD-PPA.md) for reproducible
+preparation, clean builds, signing and dput. Complete source preparation is
+blocked here by uncached cross-target crates and missing tooling/network.
+No accepted source upload or working PPA installation command is claimed.
+
+The independent [signed binary APT workflow](APT-REPOSITORY.md) remains available
+and is distinct from Launchpad source builds. Manual candidate CI jobs have not
+run here and do not publish a release. The website only links directly to assets
+confirmed by published GitHub Releases, retaining light/dark/system themes.
+
+## Upgrade, removal and troubleshooting
+
+Stop ClipVault and back up the whole data directory, including SQLite WAL and
+payload files, before upgrading. Install the newer package over the older one and
+keep the same data location or `--data-dir`. v2.1.0 changes no schema, setting name
+or shortcut format; existing migrations remain. AppImages should keep the stable
+path used by startup/shortcuts. Normal uninstall and Debian purge never delete
+personal clipboard history.
+
+- Missing libraries: use the package built for that distribution and let apt/dnf
+  resolve dependencies. Do not bypass checks or put Ubuntu libraries in an RPM.
+- Older glibc: build and verify separately on that baseline.
+- No RPM tools: use the Fedora container workflow on a capable host.
+- Incomplete source cache: prepare online once, retain all vendor licenses and
+  checksums, then verify in a clean offline builder.
+- Paste/shortcut problems: inspect Settings → Shortcuts and `clipvault --diagnostics`.
+  Use manual Ctrl+V when the desktop cannot support safe automatic paste.
+- Storage errors: stop the app and back up the complete data directory; do not
+  delete history/settings as an upgrade repair.

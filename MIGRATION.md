@@ -1,4 +1,12 @@
-# Upgrading safely to 2.0.0
+# Upgrading safely to 2.1.0
+
+Upgrading from 2.0.0 changes no storage schema, payload format, settings key or
+shortcut format. Keep the same data directory; stop the old app and back up the
+whole folder first. Existing retention/reboot preferences still apply. Package
+install/removal scripts do not delete personal data. Store reopen/legacy migration
+regressions pass; an actual package-manager upgrade remains unverified here.
+
+## Retained migration behavior from 2.0.0
 
 Keep the existing data directory. The application still uses `history.sqlite3`, `items/`, settings JSON and private Linux account permissions. No normal package install/uninstall script deletes user history.
 

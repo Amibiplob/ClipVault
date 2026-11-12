@@ -1,4 +1,4 @@
-# ClipVault 2.0.0
+# ClipVault 2.1.0
 
 <img src="assets/clipvault.svg" alt="ClipVault logo" width="70">
 
@@ -8,13 +8,15 @@
 
 The screenshot is an actual app capture, not an illustrative mockup. See [verification](V2.0.0-VERIFICATION.md) for capture provenance and its limits.
 
+Settings now use **← Back** (Back to clipboard history), responsive navigation and a scrollbar near the right edge. Larger filled accent pins identify pinned clips in both themes; pin clicks never copy or paste. See [v2.1.0 verification](V2.1.0-VERIFICATION.md) for current checks, artifact paths and limitations.
+
 ## Download and install
 
-Use [GitHub Releases](https://github.com/Amibiplob/ClipVault/releases) for packages actually published. This source upgrade is **2.0.0**; release publication is a separate step. The [website source](docs/index.html) looks up published package assets and falls back to Releases if lookup fails.
+Use [GitHub Releases](https://github.com/Amibiplob/ClipVault/releases) for packages actually published. This source upgrade is **2.1.0**; release publication is a separate step. The [website source](docs/index.html) looks up published package assets and falls back to Releases if lookup fails.
 
 - **.deb:** compatible Mint/Ubuntu/Debian-family systems. Open the downloaded file with your package installer, or `sudo apt install ./clipvault_VERSION-1_amd64.deb`.
 - **AppImage:** portable x86-64 option. Enable executable permission, then open it. If FUSE is unavailable, try `--appimage-extract-and-run`. Keep it in a stable location before setting shortcuts/startup; `bash scripts/install-appimage.sh` optionally installs a user-menu launcher.
-- **.rpm:** recipe and CI are prepared. Use only a package actually published for a compatible RPM-based system; installation is untested here.
+- **.rpm:** Fedora 44 source-build/container recipe prepared. No RPM has been built here because the build tools/container runtime and network are unavailable. After a verified Fedora build, install with `sudo dnf install ./clipvault-2.1.0-1.x86_64.rpm`; other RPM distributions require separate packages/tests.
 
 The current binary build baseline is **glibc 2.39, x86-64** (Mint 22.x / Ubuntu 24.04). AppImage does not make it compatible with older glibc. Consult the [compatibility table](COMPATIBILITY.md): native rendering and archive checks do not prove real-app paste, physical reboot, or installation on every desktop.
 
@@ -52,7 +54,7 @@ Activation moves the same record to newest-first history and retains selection i
 
 Compact is a narrow list; Comfortable adds one preview and a draggable divider. Both remember their own dimensions and maximized state. Theme supports System/Light/Dark, installed font family and size. Native window placement remains subject to desktop restrictions.
 
-Editing opens a dialog: **Save as new clip** preserves the original, and Cancel changes nothing. Automatic cleanup has optional age and unpinned-count rules; either rule may remove eligible unpinned clips. Age uses last-used, otherwise saved capture/legacy time. Pins never expire or count toward the unpinned limit. Bulk Clear unpinned history keeps pins. Deleting an individual pinned clip identifies that pin in confirmation.
+Editing opens a dialog: **Save as new clip** preserves the original, and Cancel changes nothing. Automatic cleanup has optional age and unpinned-count rules; either rule may remove eligible unpinned clips. Age uses last-used, otherwise saved capture/legacy time. Pins never expire or count toward the unpinned limit. **Clear unpinned** deletes all unpinned history, including clips hidden by search or filters, and keeps pins. It is disabled when no unpinned clips remain and follows **Confirm before deleting**; the confirmation uses **Cancel** / **Delete unpinned**. Turning confirmation off performs the same clearly labelled operation immediately. Deleting an individual pinned clip identifies that pin in confirmation.
 
 **Clear unpinned history on reboot** is off by default. It uses a changed Linux boot ID; app-only restart and package update do not count as reboot. History persists across restart/reboot by default, subject to your enabled cleanup rules.
 
@@ -72,7 +74,7 @@ Install a newer trusted package over the previous package; preserve the data fol
 - **Image preview unavailable:** original formats are still retained. Decoder availability/size limits can affect preview.
 - **Storage error:** check free space/permissions. Stop ClipVault and back up the entire data directory before repairs; do not delete the database to “fix” an upgrade.
 
-No signed APT repository or PPA is live from this task. [Repository preparation](packaging/APT-REPOSITORY.md) documents precise remaining setup. Do not use invented APT commands.
+No signed APT repository or PPA is live from this task. [Launchpad PPA preparation](packaging/LAUNCHPAD-PPA.md) targets Ubuntu 24.04 Noble / Mint 22.x amd64 with Rust/Cargo 1.89 and complete offline vendoring; clean source builds and publication remain blocked. [Independent signed APT repository preparation](packaging/APT-REPOSITORY.md) remains available. Do not use invented APT commands.
 
 ## Build, package and contribute
 
@@ -89,7 +91,8 @@ bash scripts/install-packaging-tools.sh # only if tools are missing; requires ne
 python3 scripts/extract-cached-runtime.py
 LDAI_RUNTIME_FILE="$PWD/target/packaging-tools/runtime-x86_64" bash scripts/package-linux.sh all
 bash scripts/test-linux-packages.sh
-bash scripts/package-rpm.sh             # requires rpmbuild; see packaging guide
+bash scripts/package-rpm.sh container --online # Fedora container; network/tooling required
+bash scripts/prepare-ppa-source.sh --online   # source only; then clean-build, sign, dput
 cargo test --offline performance_large_history -- --ignored --nocapture
 ```
 

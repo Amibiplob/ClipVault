@@ -1,0 +1,9 @@
+ClipVault v2.1.0
+
+• Settings: clear ← Back navigation, responsive tabs and content, scrollbar near the edge, readable larger fonts.
+• Filled, larger accent pins with light/dark contrast and Pin clip / Unpin clip labels.
+• Clear unpinned removes all unpinned history regardless of filters, keeps pins, and follows Confirm before deleting.
+• Shared clear handling and fewer settings serialization allocations; unchanged storage and shortcut formats.
+• Fedora RPM build workflow and offline Debian source / Launchpad PPA preparation.
+
+Existing history, pinned clips, settings and shortcuts are preserved. Package publication and desktop compatibility require separate verification.

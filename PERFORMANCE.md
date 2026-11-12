@@ -1,4 +1,4 @@
-# Performance measurements — 2.0.0
+# Performance measurements — 2.1.0 (with historical baselines)
 
 No fixed RAM target was promised. Baseline was recorded before storage/UI optimization.
 
@@ -44,3 +44,20 @@ The baseline launch used an isolated `/tmp/clipvault-v200-baseline` directory, n
 Remaining performance work needs real profiles: clipboard activation loads a requested item's saved representations together on the clipboard worker, not the UI thread; metadata and long-text preview caching can be further optimized if measurements justify it. A large package size is acceptable; no unsupported download-size or native memory claim appears on the website.
 
 Latest explicit workload rerun (during release compilation): 103 ms for 30 frames, VmHWM 25,544 kB / VmRSS 25,408 kB, test execution 0.25 s (target/v200-final-performance.log). Baseline/initial optimized samples above are kept unchanged. This remains a headless test-process measurement, not native desktop memory or CPU evidence.
+
+## 2.1.0 sample — 2026-11-12
+
+Same headless debug workload: 2,000 metadata records, 30 frames at 820×620:
+**69 ms**, VmRSS **26,136 kB**, VmHWM **26,488 kB**, test execution **0.16 s**
+(excludes compilation). Log: `target/v2.1.0/performance.log`. This single sample
+is not evidence of an improvement over the older samples or a native memory/CPU
+measurement. Native launch from the shell still fails at instance socket creation
+with `Operation not permitted`; Craft Anything's separate native screenshot check
+can show rendering but does not expose comparable idle profiling.
+
+2.1.0 removes two repeated JSON serializations per settings frame, shares the
+clear action's confirmation/cache cleanup logic, and releases retained image,
+text and filtered-list resources after successful bulk deletion. Polling intervals,
+clipboard ownership, native paste/shortcut integrations and migration code remain
+unchanged. All 14 direct dependencies still have source callers, including X11
+XInput/XKB/XFixes/XTEST features; none was removed on assumption.

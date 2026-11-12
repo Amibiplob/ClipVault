@@ -32,7 +32,7 @@ async function release() {
     });
     status.textContent = `Latest published release: ${data.tag_name}. ${count ? 'Available package links are shown below.' : 'Check GitHub Releases for package availability.'} The source upgrade shown here is ${config.version}.`;
   } catch (_) {
-    status.textContent = 'Release lookup unavailable. Use GitHub Releases below to see the packages actually published; v2.0.0 publication is not assumed.';
+    status.textContent = 'Release lookup unavailable. Use GitHub Releases below to see the packages actually published; v2.1.0 publication is not assumed.';
   }
 }
 release();

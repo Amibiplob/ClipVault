@@ -11,16 +11,38 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libsqlite3-0 libgdk-pixbuf-2.0-0 libgdk-pixbuf2.0-bin webp-pixbuf-loader libxkbcommon-x11-0 desktop-file-utils appstream rpm libgl1 libegl1 patchelf
+          sudo apt-get install -y build-essential pkg-config libsqlite3-0 libgdk-pixbuf-2.0-0 libgdk-pixbuf2.0-bin webp-pixbuf-loader libxkbcommon-x11-0 desktop-file-utils appstream libgl1 libegl1 patchelf
       - run: cargo fetch --locked
       - run: cargo test --locked
       - run: bash scripts/install-packaging-tools.sh
       - run: python3 scripts/packaging-support.py notices
       - run: bash scripts/package-linux.sh all
-      - run: bash scripts/package-rpm.sh
       - run: bash scripts/test-linux-packages.sh
       - uses: actions/upload-artifact@v4
         with:
           name: clipvault-linux-candidates
           path: dist/
+  fedora-rpm:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: bash scripts/package-rpm.sh container --online
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clipvault-fedora-rpm-candidate
+          path: dist/*.rpm
+          if-no-files-found: error
+  ppa-source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y dpkg-dev devscripts debhelper lintian
+      - run: bash scripts/prepare-ppa-source.sh --online
+      - run: lintian target/ppa-source/*_source.changes
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clipvault-unsigned-source-candidate
+          path: target/ppa-source/clipvault_*.*
   # No release upload: candidates need distribution installation and paste acceptance.

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.0 — 2026-11-12
+
+- Responsive settings use the available width, reserve scrollbar space near the edge and wrap navigation at narrow/larger-font sizes; ← Back returns to clipboard history.
+- Larger filled accent pins and readable outline pins with Pin clip / Unpin clip labels; clicks remain separate from activation.
+- Clear unpinned consistently follows the confirmation preference, operates on all history regardless of filters, keeps pins and disables when empty.
+- Shared clear handling releases retained preview/list resources; compare settings without repeated JSON serialization. Existing dependencies, migrations and desktop integrations remain required.
+- Fedora source RPM/container workflow and complete Debian source/PPA preparation for Noble/Mint 22.x. RPM and clean offline source builds remain blocked in this environment; see V2.1.0-VERIFICATION.md.
+
 ## 2.0.0 — 2026-11-11
 
 - Select a row or press Enter to restore saved clipboard formats, hide the panel, and attempt automatic paste on X11. Clipboard failure leaves history open. Unsupported/failing paste keeps the copied item and gives a Ctrl+V fallback. XTEST submission is not an acknowledgement from the destination app.

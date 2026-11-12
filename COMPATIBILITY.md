@@ -1,4 +1,4 @@
-# ClipVault 2.0.0 — compatibility
+# ClipVault 2.1.0 — compatibility
 
 Tested = that exact behavior was exercised. Limited = partial evidence or a known limitation. Untested = implementation/design only. Package extraction is not installation testing.
 
@@ -9,7 +9,7 @@ Tested = that exact behavior was exercised. Limited = partial evidence or a know
 | Ubuntu 24.04+ | GNOME | Wayland | Limited: needs ext/wlr data-control; stock sessions may not expose it | Untested: GNOME custom action; independent of clipboard support | Limited: manual Ctrl+V fallback | Untested | Untested |
 | Mint 22.x | MATE | X11 | Untested | Untested: MATE custom keybinding | Untested: XTEST attempt | Untested | Untested |
 | Mint 22.x | Xfce | X11 | Untested | Untested: xfconf custom command | Untested: XTEST attempt | Untested | Untested |
-| Fedora 41+ | Plasma / GNOME | X11 / Wayland | Untested / requires data-control on Wayland | Plasma manual Keyboard setup; GNOME managed where available | X11 attempt / Wayland manual fallback | RPM recipe prepared; rpmbuild unavailable here | Untested |
+| Fedora 44 | Plasma / GNOME | X11 / Wayland | Untested / requires data-control on Wayland | Plasma manual Keyboard setup; GNOME managed where available | X11 attempt / Wayland manual fallback | Source RPM/container recipe prepared; RPM build/install/launch blocked here | Untested |
 | Arch / openSUSE and other Linux | Varies | X11 / Wayland | Capability-dependent; Untested | Desktop integration where supported, otherwise manual | X11 attempt / Wayland fallback | Untested | Untested |
 
 The local build baseline is glibc 2.39, x86-64. Mint 21 / Ubuntu 22.04 and older glibc systems cannot run this binary merely by choosing AppImage. Build from source on an appropriate target baseline for older systems; that path is unverified. Graphics libraries and a working desktop are required. No Windows/macOS support.

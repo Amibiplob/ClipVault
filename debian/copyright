@@ -1,0 +1,46 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: ClipVault
+Source: https://github.com/Amibiplob/ClipVault
+
+Files: *
+Copyright: 2026 Md Biplob Hosain
+License: MIT
+ MIT License
+ .
+ Copyright (c) 2026 Md Biplob Hosain
+ .
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+ .
+ The above copyright notice and this permission notice shall be included in all
+ copies or substantial portions of the Software.
+ .
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ SOFTWARE.
+
+Files: vendor/*
+Copyright: See each vendored component's original license and copyright files
+License: See-component-licenses
+ All dependency license/notice files are retained unchanged under vendor/.
+ THIRD-PARTY-NOTICES.txt contains the active Linux dependency notices and
+ embedded font attributions. Original component licenses apply; this stanza
+ does not relicense dependencies. Cargo checksums remain in the source.
+
+Files: assets/Interface.ttf assets/Interface.ttf.LICENSE
+Copyright: 2010,2012-2020 Google Inc.; 2015-2020 Google LLC. (see full bundled attribution)
+License: OFL-1.1
+ See assets/Interface.ttf.LICENSE for the complete license.
+
+Files: assets/social/*
+Copyright: 2019-2024 The Bootstrap Authors
+License: MIT
+ See assets/social/LICENSE.txt for complete attribution and license.

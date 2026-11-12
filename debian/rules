@@ -1,0 +1,32 @@
+#!/usr/bin/make -f
+export RUSTC = /usr/bin/rustc-1.89
+export RUSTDOC = /usr/bin/rustdoc-1.89
+export CARGO_HOME = $(CURDIR)/debian/cargo-home
+export CARGO_TARGET_DIR = $(CURDIR)/target
+export CARGO_NET_OFFLINE = true
+export LC_ALL = C.UTF-8
+CARGO = /usr/bin/cargo-1.89
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	test -d vendor
+	test -s .cargo/config.toml
+	$(RUSTC) --version
+	$(CARGO) --version
+
+override_dh_auto_build:
+	$(CARGO) build --release --locked --offline
+
+override_dh_auto_test:
+	$(CARGO) test --locked --offline
+	test "$$(target/release/clipvault --version)" = 'ClipVault 2.1.0'
+	desktop-file-validate packaging/linux/io.clipvault.desktop.desktop
+
+override_dh_auto_install:
+	python3 scripts/install-release-assets.py debian/clipvault
+	cp -L /usr/share/doc/libstd-rust-1.89-dev/copyright debian/clipvault/usr/share/doc/clipvault/RUST-TOOLCHAIN-NOTICES.txt
+
+override_dh_auto_clean:
+	rm -rf target debian/cargo-home

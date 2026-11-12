@@ -23,11 +23,11 @@ trap 'rm -rf -- "$work"' EXIT
 check_tree() {
     local tree=$1 launcher=$2 label=$3
     test -x "$tree/usr/bin/clipvault"
-    for file in usr/share/applications/io.clipvault.desktop.desktop usr/share/icons/hicolor/scalable/apps/clipvault.svg usr/share/doc/clipvault/LICENSE usr/share/doc/clipvault/THIRD-PARTY-NOTICES.txt usr/share/doc/clipvault/README.md usr/share/doc/clipvault/PACKAGING.md usr/share/doc/clipvault/CHANGELOG-v2.0.0.txt usr/share/doc/clipvault/V2.0.0-VERIFICATION.md usr/share/metainfo/io.clipvault.desktop.metainfo.xml; do
+    for file in usr/share/applications/io.clipvault.desktop.desktop usr/share/icons/hicolor/scalable/apps/clipvault.svg usr/share/doc/clipvault/LICENSE usr/share/doc/clipvault/THIRD-PARTY-NOTICES.txt usr/share/doc/clipvault/README.md usr/share/doc/clipvault/PACKAGING.md usr/share/doc/clipvault/CHANGELOG-v2.1.0.txt usr/share/doc/clipvault/V2.1.0-VERIFICATION.md usr/share/metainfo/io.clipvault.desktop.metainfo.xml; do
         test -s "$tree/$file"
     done
     desktop-file-validate "$tree/usr/share/applications/io.clipvault.desktop.desktop"
-    cmp "$root/CHANGELOG-v2.0.0.txt" "$tree/usr/share/doc/clipvault/CHANGELOG-v2.0.0.txt"
+    cmp "$root/CHANGELOG-v2.1.0.txt" "$tree/usr/share/doc/clipvault/CHANGELOG-v2.1.0.txt"
     cmp "$root/packaging/linux/io.clipvault.desktop.metainfo.xml" "$tree/usr/share/metainfo/io.clipvault.desktop.metainfo.xml"
     cmp "$root/assets/clipvault.svg" "$tree/usr/share/icons/hicolor/scalable/apps/clipvault.svg"
     rg -q '^Icon=clipvault$' "$tree/usr/share/applications/io.clipvault.desktop.desktop"
@@ -37,6 +37,7 @@ check_tree() {
     done
     readelf -h "$tree/usr/bin/clipvault" | rg -q 'Machine:.*X86-64'
     if ldd "$tree/usr/bin/clipvault" | rg 'not found'; then return 1; fi
+    test "$("$launcher" --version)" = "ClipVault $version"
     "$launcher" --help | rg -q 'ClipVault'
     "$launcher" --diagnostics | rg -q 'Clipboard: native'
     printf 'PASS: %s contents, desktop entry, x86-64 executable, linkage, help and diagnostics\n' "$label"

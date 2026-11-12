@@ -1,13 +1,9 @@
-# ClipVault v2.0.0
+# ClipVault v2.1.0
 
-Your clipboard, with a memory. A native Rust clipboard manager by **Md Biplob Hosain**.
+Settings now provide ← Back, responsive navigation/content and a scrollbar close to the right edge. Pinned clips use a larger filled accent icon with contrast in both themes. Clear unpinned states its global scope, keeps pins, disables when no unpinned clips remain, and follows Confirm before deleting.
 
-This source upgrade adds automatic paste attempts with clear fallback, safer desktop shortcuts, separate capture/last-used timestamps, independent layouts, reboot-aware optional cleanup, grouped settings, bounded preview loading and an accessible website. Existing history, pins, supported MIME payloads and preferences stay in their existing data directory. Original capture times lost by older versions cannot be reconstructed.
+Existing history, pins, preferences, MIME payloads, shortcut behavior and storage formats are preserved. Shared clear handling drops retained preview resources; repeated settings JSON serialization was removed. No dependencies were removed without evidence of being unused.
 
-Package-manager updates and optional GitHub release checks are separate. Installed-executable replacement detection defers restart for unsaved edits. See [CHANGELOG.md](CHANGELOG.md) for changes and [V2.0.0-VERIFICATION.md](V2.0.0-VERIFICATION.md) for exact outputs, checks and blockers. The version is 2.0.0 in source; no GitHub release, PPA or signed APT repository has been published by this task.
+The existing Debian and AppImage workflows are rebuilt for 2.1.0. Fedora RPM and offline Debian source/PPA workflows are prepared, with environment blockers recorded in [verification](V2.1.0-VERIFICATION.md). See [packaging](packaging/README.md) and [Launchpad setup](packaging/LAUNCHPAD-PPA.md). No release, PPA or website has been published by this task.
 
-Before upgrading, stop ClipVault and back up the **whole** local storage folder (normally `~/.local/share/clipvault`), including SQLite WAL files and `items/`. Do not delete this directory during package installation or removal. See [MIGRATION.md](MIGRATION.md).
-
-Desktop support varies: [compatibility table](COMPATIBILITY.md). Automatic paste on X11 is an input request, not proof the target accepted content; Wayland uses manual Ctrl+V where safe automation is unavailable. No “all Linux distributions” or fixed RAM promise.
-
-MIT License. [Project](https://github.com/Amibiplob/ClipVault) · [Issues](https://github.com/Amibiplob/ClipVault/issues) · [Portfolio](https://amibiplob.vercel.app) · [Developer GitHub](https://github.com/Amibiplob) · [LinkedIn](https://linkedin.com/in/amibiplob)
+Stop ClipVault and back up the whole storage directory before upgrading. Install the newer package using the same source and data path; normal removal never deletes personal history. Existing cleanup preferences still apply. [Migration](MIGRATION.md) and [compatibility](COMPATIBILITY.md) document the boundaries; external clipboard/paste/shortcut behavior still requires real desktop acceptance.

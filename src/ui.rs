@@ -11,6 +11,14 @@ use std::{
     time::{Duration, Instant},
 };
 const ACCENT: Color32 = Color32::from_rgb(190, 165, 239);
+fn pin_color(dark: bool, pinned: bool) -> Color32 {
+    match (dark, pinned) {
+        (true, true) => Color32::from_rgb(211, 183, 255),
+        (false, true) => Color32::from_rgb(103, 48, 166),
+        (true, false) => Color32::from_rgb(161, 160, 181),
+        (false, false) => Color32::from_rgb(99, 94, 113),
+    }
+}
 fn muted(ui: &Ui) -> Color32 {
     if ui.visuals().dark_mode {
         Color32::from_rgb(161, 160, 181)
@@ -512,6 +520,56 @@ impl VaultApp {
     fn pin(&mut self, item: &Item) {
         self.mutate(|s| s.pin(&item.id));
     }
+    fn clear_unpinned_button(&mut self, ui: &mut Ui) {
+        // Deliberately use the complete store, never the filtered list cache.
+        let has_unpinned = self.store.lock().unwrap().items.iter().any(|i| !i.pinned);
+        let response = ui.add_enabled(has_unpinned, Button::new("Clear unpinned"))
+            .on_hover_text("Delete all unpinned history, including clips hidden by search or filters. Pinned clips will be kept.");
+        response.widget_info(|| {
+            WidgetInfo::labeled(
+                WidgetType::Button,
+                has_unpinned,
+                "Clear all unpinned history; pinned clips will be kept",
+            )
+        });
+        if response.clicked() {
+            self.request_clear_unpinned();
+        }
+    }
+    fn request_clear_unpinned(&mut self) {
+        let (has_unpinned, confirm) = {
+            let store = self.store.lock().unwrap();
+            (
+                store.items.iter().any(|i| !i.pinned),
+                store.settings.confirm_before_delete,
+            )
+        };
+        if !has_unpinned {
+            return;
+        }
+        if confirm {
+            self.confirm_clear = true;
+        } else {
+            self.clear_unpinned_confirmed();
+        }
+    }
+    fn clear_unpinned_confirmed(&mut self) {
+        if self.mutate(|s| s.clear(false)) {
+            self.confirm_clear = false;
+            self.preview = None;
+            self.selected = None;
+            self.textures.clear();
+            self.text_cache = None;
+            self.image_result = None;
+            self.image_loading = None;
+            self.image_errors.clear();
+            self.list_cache = None;
+            self.toast = Some((
+                "Deleted all unpinned history. Pinned clips kept.".into(),
+                Instant::now(),
+            ));
+        }
+    }
     fn delete(&mut self, item: &Item) {
         // Detail views can outlive a pin change; use authoritative saved state.
         let current = {
@@ -844,9 +902,13 @@ impl VaultApp {
         if icons::button(
             &mut child,
             if item.pinned { "pin-filled" } else { "pin" },
-            if item.pinned { "Unpin" } else { "Pin" },
-            26.,
-            if item.pinned { ACCENT } else { muted(ui) },
+            if item.pinned {
+                "Unpin clip"
+            } else {
+                "Pin clip"
+            },
+            30.,
+            pin_color(ui.visuals().dark_mode, item.pinned),
         )
         .clicked()
         {
@@ -1054,45 +1116,71 @@ impl VaultApp {
     }
     fn settings(&mut self, ui: &mut Ui, ctx: &Context) {
         let previous = self.settings_tab;
-        let available = ui.available_size();
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.;
-            ui.allocate_ui_with_layout(
-                vec2(96., available.y),
-                Layout::top_down(Align::Min),
-                |ui| {
-                    if ui.button("History").clicked() {
-                        self.settings_open = false;
-                    }
-                    ui.add_space(12.);
-                    for (index, label) in ["General", "Appearance", "Shortcuts", "Privacy", "About"]
-                        .iter()
-                        .enumerate()
-                    {
-                        ui.selectable_value(&mut self.settings_tab, index, *label);
-                    }
-                },
-            );
+        // Keep the content and its scrollbar at the window edge. At narrow
+        // logical widths (including larger font zoom), navigation wraps above it.
+        if ui.available_width() < 600. {
+            ui.horizontal_wrapped(|ui| self.settings_navigation(ui));
             ui.separator();
-            ui.allocate_ui_with_layout(
-                vec2((available.x - 148.).max(120.), available.y),
-                Layout::top_down(Align::Min),
-                |ui| {
-                    ui.set_max_width((available.x - 164.).max(120.));
+            self.settings_content(ui, ctx);
+        } else {
+            let available = ui.available_size();
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui_with_layout(
+                    vec2(108., available.y),
+                    Layout::top_down(Align::Min),
+                    |ui| self.settings_navigation(ui),
+                );
+                ui.separator();
+                let remaining = ui.available_size();
+                ui.allocate_ui_with_layout(remaining, Layout::top_down(Align::Min), |ui| {
                     self.settings_content(ui, ctx);
-                },
-            );
-        });
+                });
+            });
+        }
         if previous != self.settings_tab || !self.settings_open {
             self.cancel_recording();
         }
     }
+    fn settings_navigation(&mut self, ui: &mut Ui) {
+        // Draw the arrow so fonts without U+2190 remain readable.
+        let back = ui
+            .button("    Back")
+            .on_hover_text("Back to clipboard history");
+        icons::draw(
+            ui.painter(),
+            Rect::from_center_size(
+                pos2(back.rect.left() + 15., back.rect.center().y),
+                vec2(18., 18.),
+            ),
+            "back",
+            ui.visuals().text_color(),
+        );
+        back.widget_info(|| {
+            WidgetInfo::labeled(WidgetType::Button, true, "Back to clipboard history")
+        });
+        if back.clicked() {
+            self.settings_open = false;
+            self.preview = None;
+            self.focus_search = true;
+        }
+        for (index, label) in ["General", "Appearance", "Shortcuts", "Privacy", "About"]
+            .iter()
+            .enumerate()
+        {
+            ui.selectable_value(&mut self.settings_tab, index, *label);
+        }
+    }
     fn settings_content(&mut self, ui: &mut Ui, ctx: &Context) {
-        let mut s = self.store.lock().unwrap().settings.clone();
-        let before = serde_json::to_string(&s).unwrap();
+        let before = self.store.lock().unwrap().settings.clone();
+        let mut s = before.clone();
         let previous_startup = (s.startup, s.start_hidden);
         let mut startup_changed = false;
-        ScrollArea::vertical().id_salt("settings-page").auto_shrink([false,false]).show(ui,|ui|{
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+        ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+        ui.spacing_mut().scroll.bar_width = 8.;
+        ui.spacing_mut().scroll.bar_inner_margin = 4.;
+        ui.spacing_mut().scroll.bar_outer_margin = 0.;
+        ScrollArea::vertical().id_salt(("settings-page", self.settings_tab)).auto_shrink([false,false]).show(ui,|ui|{
             ui.set_max_width(ui.available_width());
             match self.settings_tab {
                 0=>{
@@ -1118,7 +1206,8 @@ impl VaultApp {
                     ui.label("Off by default. Only a changed Linux boot ID triggers cleanup. Restarting ClipVault or updating its package does not. Pins stay safe.");
                     ui.separator();
                     ui.horizontal_wrapped(|ui|{ui.label("Maximum clip size");ui.add(DragValue::new(&mut s.max_mb).range(1..=128).suffix(" MB"));});
-                    if ui.button("Clear unpinned history…").clicked(){self.confirm_clear=true;}
+                    self.clear_unpinned_button(ui);
+                    ui.label("Clears all unpinned history, including clips hidden by search or filters. Pinned clips will be kept.");
                 }
                 1=>{
                     heading(ui,"Appearance","A comfortable space for your clipboard.");
@@ -1128,18 +1217,18 @@ impl VaultApp {
                         }
                     });
                     ui.add_space(12.);
-                    ui.horizontal(|ui|{ui.selectable_value(&mut s.compact,true,"Compact");ui.selectable_value(&mut s.compact,false,"Comfortable");});
+                    ui.horizontal_wrapped(|ui|{ui.selectable_value(&mut s.compact,true,"Compact");ui.selectable_value(&mut s.compact,false,"Comfortable");});
                     ui.label(RichText::new("Compact shows just the clip content. Comfortable adds one full-content preview on the right.").color(muted(ui)));
 
                     ui.add_space(8.);
                     ui.label("App font");
-                    ComboBox::from_id_salt("app-font").selected_text(if s.app_font.is_empty() { "System default" } else { &s.app_font }).width(220.).show_ui(ui, |ui| {
+                    ComboBox::from_id_salt("app-font").selected_text(if s.app_font.is_empty() { "System default" } else { &s.app_font }).width(ui.available_width().min(220.)).show_ui(ui, |ui| {
                         ui.selectable_value(&mut s.app_font, String::new(), "System default");
                         for font in &self.installed_fonts { ui.selectable_value(&mut s.app_font, font.family.clone(), &font.family); }
                     });
                     ui.label("The quick brown fox jumps over the lazy dog. Aa 0123456789");
                     if !self.font_available { ui.label("Saved font unavailable. Using System default until it is installed again."); }
-                    ui.horizontal(|ui|{ui.label("Font size");ui.add(DragValue::new(&mut s.font_size).range(12.0..=22.0).suffix(" pt"));});
+                    ui.horizontal_wrapped(|ui|{ui.label("Font size");ui.add(DragValue::new(&mut s.font_size).range(12.0..=22.0).suffix(" pt"));});
                     ui.label("Resize from the window border. Size and position are saved while running; Wayland controls window placement.");
                 }
                 2=>{ self.shortcuts_page(ui); }
@@ -1172,7 +1261,7 @@ impl VaultApp {
                 self.error = Some(e);
             }
         }
-        if before != serde_json::to_string(&s).unwrap() {
+        if before != s {
             let deletes = { self.store.lock().unwrap().cleanup_ids(&s).len() };
             let old = self.store.lock().unwrap().settings.clone();
             let retention_changed = old.age_enabled != s.age_enabled
@@ -1394,7 +1483,7 @@ impl VaultApp {
         }
     }
     fn about_page(&mut self, ui: &mut Ui, ctx: &Context, settings: &mut Settings) {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             // This bundled raster is generated solely from assets/clipvault.svg.
             ui.image((self.logo.id(), vec2(52., 52.)));
             ui.vertical(|ui| {
@@ -1549,10 +1638,11 @@ impl VaultApp {
     }
     fn dialogs(&mut self, ctx: &Context) {
         if self.confirm_clear {
-            Window::new("Clear unpinned history?").collapsible(false).resizable(false).anchor(Align2::CENTER_CENTER,Vec2::ZERO).show(ctx,|ui|{
-                ui.set_max_width(330.);ui.label("Delete all unpinned saved clips and unused payloads? Pinned clips are protected. This cannot be undone.");
+            Window::new("Clear unpinned").collapsible(false).resizable(false).anchor(Align2::CENTER_CENTER,Vec2::ZERO).show(ctx,|ui|{
+                ui.set_max_width(330.);ui.label("Delete all unpinned clips? Pinned clips will be kept.");
+                ui.label("This clears all unpinned history, including clips hidden by search or content filters. This cannot be undone.");
                 ui.horizontal(|ui|{if ui.button("Cancel").clicked(){self.confirm_clear=false;}
-                    if ui.button("Clear unpinned history").clicked(){self.mutate(|s|s.clear(false));self.confirm_clear=false;self.preview=None;self.textures.clear();}});
+                    if ui.button("Delete unpinned").clicked(){self.clear_unpinned_confirmed();}});
             });
         }
         if let Some(item) = self.confirm_delete.clone() {
@@ -1618,7 +1708,7 @@ impl VaultApp {
             ScrollArea::vertical()
                 .max_height((ctx.screen_rect().height() - 180.).max(100.))
                 .show(ui, |ui| {
-                    ui.add(Label::new(include_str!("../CHANGELOG-v2.0.0.txt")).wrap());
+                    ui.add(Label::new(include_str!("../CHANGELOG-v2.1.0.txt")).wrap());
                 });
             if ui.button("Done").clicked() {
                 self.dismiss_changelog();
@@ -1888,7 +1978,7 @@ impl VaultApp {
                     }
                 });
             });
-        CentralPanel::default().frame(Frame::NONE.fill(ctx.style().visuals.panel_fill).inner_margin(18)).show(ctx,|ui|{
+        CentralPanel::default().frame(Frame::NONE.fill(ctx.style().visuals.panel_fill).inner_margin(if self.settings_open { Margin { left: 18, right: 6, top: 18, bottom: 18 } } else { Margin::same(18) })).show(ctx,|ui|{
             if let Some(e)=self.error.clone(){ui.horizontal_wrapped(|ui|{ui.add(Label::new(RichText::new(&e).color(if settings.light{Color32::DARK_RED}else{Color32::from_rgb(238,176,150)})).wrap());if ui.small_button("Dismiss").clicked(){self.error=None;}});
                 if self.active_shortcut.is_none()&&self.desktop_shortcut.is_none(){ui.horizontal_wrapped(|ui|{
                     if ui.button("Choose shortcut").clicked(){self.settings_open=true;self.settings_tab=2;self.begin_shortcut_recording();}
@@ -1899,7 +1989,8 @@ impl VaultApp {
                 if self.settings_open{self.settings(ui,ctx);return;}
                 if let Some(item)=self.preview.clone(){self.detail(ui,ctx,&item,true);return;}
                 self.search(ui);ui.separator();
-                ui.horizontal(|ui|{ui.label(RichText::new(format!("{} clips · Newest first",items.len())).color(muted(ui)));ui.with_layout(Layout::right_to_left(Align::Center),|ui|{if ui.small_button("Clear…").clicked(){self.confirm_clear=true;}});});
+                ui.horizontal_wrapped(|ui|{ui.label(RichText::new(format!("{} clips · Newest first",items.len())).color(muted(ui)));self.clear_unpinned_button(ui);});
+                if !query.is_empty() || self.category != "All" { ui.label(RichText::new("Clear unpinned applies to all history, including hidden clips.").color(muted(ui))); }
                 if let Some(version)=self.replacement.clone(){
                     ui.label(format!("An installed update ({version}) is ready. Close the panel to restart safely. Unsaved edits are kept open."));
                     if ui.button("Restart now").clicked() && self.editor.is_none(){self.restart_safely(ctx);}
@@ -3322,7 +3413,7 @@ mod tests {
         frame(&mut app, &ctx);
         assert!(app.changelog_open);
         let output = frame(&mut app, &ctx);
-        text_position(&output, "What’s New in ClipVault v2.0.0");
+        text_position(&output, "What’s New in ClipVault v2.1.0");
         let output = frame(&mut app, &ctx);
         click_at(&ctx, text_position(&output, "Done"), |ctx| app.render(ctx));
         assert!(!app.changelog_open);
@@ -3558,7 +3649,7 @@ mod tests {
                 .contains(&ViewportCommand::BeginResize(egui::ResizeDirection::West))));
     }
     #[test]
-    fn v120_pin_states_differ_in_shape_and_color_and_clear_still_confirms() {
+    fn pin_states_differ_and_clear_respects_confirmation_preference() {
         let (mut app, rx, root) = app();
         let ctx = Context::default();
         let mut item = app.store.lock().unwrap().items[0].clone();
@@ -3573,19 +3664,250 @@ mod tests {
         let accent_paths = |o: &FullOutput| {
             o.shapes
                 .iter()
-                .filter(|s| matches!(&s.shape,Shape::Path(p) if p.fill==ACCENT))
+                .filter(|s| matches!(&s.shape,Shape::Path(p) if p.fill==pin_color(true, true)))
                 .count()
         };
         assert_eq!(accent_paths(&outline), 0);
         assert_eq!(accent_paths(&filled), 1);
-        app.store.lock().unwrap().settings.confirm_before_delete = false;
+        app.store.lock().unwrap().settings.confirm_before_delete = true;
         let output = frame(&mut app, &ctx);
-        click_at(&ctx, text_position(&output, "Clear…"), |ctx| {
+        click_at(&ctx, text_position(&output, "Clear unpinned"), |ctx| {
             app.render(ctx)
         });
         assert!(app.confirm_clear);
         assert_eq!(app.store.lock().unwrap().items.len(), 1);
         assert!(rx.try_recv().is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn v210_back_returns_to_history_without_clipboard_commands() {
+        let (mut app, rx, root) = app();
+        let ctx = Context::default();
+        app.settings_open = true;
+        app.settings_tab = 1;
+        let mut output = frame(&mut app, &ctx);
+        for _ in 0..2 {
+            output = frame(&mut app, &ctx);
+        }
+        click_at(&ctx, text_position(&output, "    Back"), |ctx| {
+            app.render(ctx)
+        });
+        assert!(!app.settings_open);
+        assert!(app.preview.is_none());
+        assert!(rx.try_recv().is_err());
+        let output = frame(&mut app, &ctx);
+        text_position(&output, "Search clips…");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn v210_clear_all_unpinned_ignores_filters_and_keeps_pins_and_preferences() {
+        for confirm in [false, true] {
+            let (mut app, rx, root) = app();
+            let ctx = Context::default();
+            let pinned = {
+                let mut store = app.store.lock().unwrap();
+                let id = store.items[0].id.clone();
+                store.pin(&id).unwrap();
+                store.settings.confirm_before_delete = confirm;
+                store.save_settings().unwrap();
+                store
+                    .ingest(
+                        &Snapshot::from([("text/plain".into(), b"Hidden unpinned".to_vec())]),
+                        "test",
+                    )
+                    .unwrap();
+                id
+            };
+            let preferences = app.store.lock().unwrap().settings.clone();
+            app.category = "Pinned".into();
+            app.query = "No matching clip".into();
+            let output = frame(&mut app, &ctx);
+            text_position(
+                &output,
+                "Clear unpinned applies to all history, including hidden clips.",
+            );
+            click_at(&ctx, text_position(&output, "Clear unpinned"), |ctx| {
+                app.render(ctx)
+            });
+            if confirm {
+                assert!(app.confirm_clear);
+                let output = frame(&mut app, &ctx);
+                text_position(
+                    &output,
+                    "Delete all unpinned clips? Pinned clips will be kept.",
+                );
+                click_at(&ctx, text_position(&output, "Cancel"), |ctx| {
+                    app.render(ctx)
+                });
+                assert!(!app.confirm_clear);
+                assert_eq!(app.store.lock().unwrap().items.len(), 2);
+                app.request_clear_unpinned();
+                let output = frame(&mut app, &ctx);
+                click_at(&ctx, text_position(&output, "Delete unpinned"), |ctx| {
+                    app.render(ctx)
+                });
+            }
+            assert!(!app.confirm_clear);
+            assert!(app.textures.is_empty());
+            assert!(app.text_cache.is_none());
+            let restored = Store::open(root.clone()).unwrap();
+            assert_eq!(restored.items.len(), 1);
+            assert_eq!(restored.items[0].id, pinned);
+            assert!(restored.items[0].pinned);
+            assert!(restored.settings == preferences);
+            let output = frame(&mut app, &ctx);
+            click_at(&ctx, text_position(&output, "Clear unpinned"), |ctx| {
+                app.render(ctx)
+            });
+            assert!(!app.confirm_clear, "disabled when only pinned clips remain");
+            assert_eq!(app.store.lock().unwrap().items.len(), 1);
+            assert!(rx.try_recv().is_err());
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+    #[test]
+    fn v210_pins_have_contrast_in_both_themes_and_never_activate() {
+        let luminance = |color: Color32| {
+            let c = color.to_array();
+            let f = |v: u8| {
+                let v = v as f32 / 255.;
+                if v <= 0.04045 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2])
+        };
+        for dark in [false, true] {
+            for selected in [false, true] {
+                let (mut app, rx, root) = app();
+                let ctx = Context::default();
+                ctx.set_visuals(if dark {
+                    Visuals::dark()
+                } else {
+                    Visuals::light()
+                });
+                let background = if selected {
+                    if dark {
+                        Color32::from_rgb(47, 40, 62)
+                    } else {
+                        Color32::from_rgb(232, 220, 248)
+                    }
+                } else {
+                    ctx.style().visuals.panel_fill
+                };
+                for pinned in [false, true] {
+                    let color = pin_color(dark, pinned);
+                    let a = luminance(color);
+                    let b = luminance(background);
+                    assert!(
+                        (a.max(b) + 0.05) / (a.min(b) + 0.05) >= 3.,
+                        "pin contrast {dark}/{selected}/{pinned}"
+                    );
+                    let item = app.store.lock().unwrap().items[0].clone();
+                    app.selected = selected.then(|| item.id.clone());
+                    click_row(
+                        &mut app,
+                        &ctx,
+                        &item,
+                        pos2(440. - 8. - 72. - 6. + 15., 8. + 26.),
+                    );
+                    assert_eq!(app.store.lock().unwrap().items[0].pinned, !pinned);
+                    assert!(rx.try_recv().is_err());
+                    assert!(!app.hidden);
+                    assert!(app.pending_activation.is_none());
+                }
+                std::fs::remove_dir_all(root).unwrap();
+            }
+        }
+    }
+    #[test]
+    fn v210_settings_resize_large_fonts_use_width_and_reserve_scrollbar() {
+        let (mut app, _rx, root) = app();
+        for (width, height) in [(440u32, 420u32), (440, 540), (820, 620)] {
+            for zoom in [1., 22. / 14.] {
+                for dark in [true, false] {
+                    for tab in 0..5 {
+                        let ctx = Context::default();
+                        crate::fonts::apply(&ctx, "", &[]);
+                        ctx.style_mut(|style| {
+                            style
+                                .text_styles
+                                .insert(TextStyle::Body, FontId::proportional(13.));
+                            style
+                                .text_styles
+                                .insert(TextStyle::Button, FontId::proportional(13.));
+                            style.spacing.button_padding = vec2(11., 8.);
+                            style.spacing.item_spacing = vec2(8., 9.);
+                        });
+                        if zoom != 1. {
+                            let _ = ctx.run(
+                                RawInput {
+                                    screen_rect: Some(Rect::from_min_size(
+                                        Pos2::ZERO,
+                                        vec2(width as f32, height as f32),
+                                    )),
+                                    ..Default::default()
+                                },
+                                |_| {},
+                            );
+                        }
+                        ctx.set_zoom_factor(zoom);
+                        ctx.set_visuals(if dark {
+                            Visuals::dark()
+                        } else {
+                            Visuals::light()
+                        });
+                        app.settings_open = true;
+                        app.settings_tab = tab;
+                        let mut textures = HashMap::new();
+                        for frame in 0..3 {
+                            let output = ctx.run(RawInput {
+                                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width as f32/zoom,height as f32/zoom))),
+                                ..Default::default()
+                            }, |ctx| {
+                                CentralPanel::default().frame(Frame::NONE.fill(ctx.style().visuals.panel_fill).inner_margin(Margin{left:18,right:6,top:18,bottom:18})).show(ctx, |ui| {
+                                    app.settings(ui,ctx);
+                                    assert!(ui.min_rect().right() <= ctx.screen_rect().right()-5., "settings overflow width={width}, zoom={zoom}, tab={tab}: {:?} screen {:?}",ui.min_rect(),ctx.screen_rect());
+                                });
+                            });
+                            if frame == 2 && tab == 0 {
+                                let edge = ctx.screen_rect().right() - 6.;
+                                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                                    Shape::Rect(rect) if (rect.rect.right()-edge).abs()<1.
+                                        && (rect.rect.width()-8.).abs()<1. && rect.rect.height()>16.)),
+                                    "scrollbar must stay 6 points from the edge: {width}/{zoom}/{dark}");
+                            }
+                            // Only inspect text within the scrolling content's viewport.
+                            if frame == 2 {
+                                for shape in &output.shapes {
+                                    if let Shape::Text(text) = &shape.shape {
+                                        let right = text.pos.x + text.galley.size().x;
+                                        assert!(
+                                            right <= ctx.screen_rect().right() - 5. + 1.,
+                                            "text overflows {width}/{zoom}/{tab}: {} at {right}",
+                                            text.galley.job.text
+                                        );
+                                    }
+                                }
+                            }
+                            if width == 440 && tab == 0 && zoom == 1. {
+                                crate::ui_capture::capture(
+                                    &ctx,
+                                    output,
+                                    &mut textures,
+                                    [width, height],
+                                    &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
+                                        "target/v2.1.0/settings-{width}-{height}-{dark}.png"
+                                    )),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]

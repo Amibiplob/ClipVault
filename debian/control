@@ -1,0 +1,23 @@
+Source: clipvault
+Section: utils
+Priority: optional
+Maintainer: ClipVault Maintainer <maintainer@example.invalid>
+Build-Depends: debhelper-compat (= 13), rustc-1.89 (>= 1.89), cargo-1.89 (>= 1.89),
+ pkg-config, python3, libsqlite3-0, libgdk-pixbuf-2.0-0, desktop-file-utils,
+ libwayland-dev, libxkbcommon-dev, libegl-dev, libgl-dev
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+Homepage: https://github.com/Amibiplob/ClipVault
+
+Package: clipvault
+Architecture: amd64
+Depends: ${shlibs:Depends}, ${misc:Depends}, libsqlite3-0, libgdk-pixbuf-2.0-0,
+ libx11-6, libx11-xcb1, libxcursor1, libxi6, libxrandr2, libxinerama1,
+ libxrender1, libxfixes3, libxext6, libxkbcommon0, libxkbcommon-x11-0,
+ libxcb1, libxcb-render0, libxcb-shape0, libxcb-xfixes0, libwayland-client0,
+ libwayland-cursor0, libwayland-egl1, libgl1, libegl1, xkb-data
+Recommends: fontconfig, webp-pixbuf-loader, xdg-utils
+Description: Private native Linux clipboard history
+ ClipVault keeps a local history of copied text and images. Open it with a
+ keyboard shortcut to search, pin, and reuse previous clips. History and
+ settings remain in the user's private data directory during upgrades/removal.

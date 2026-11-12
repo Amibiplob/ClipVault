@@ -11,7 +11,7 @@ use std::{
 pub const API: &str = "https://api.github.com/repos/Amibiplob/ClipVault/releases/latest";
 pub const DAY: i64 = 86400;
 const MAX_RESPONSE: u64 = 512 * 1024;
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
     pub automatic: bool,

@@ -154,6 +154,10 @@ pub fn draw(p: &Painter, r: Rect, name: &str, color: Color32) {
             line(&[(6., 6.), (18., 18.)]);
             line(&[(18., 6.), (6., 18.)]);
         }
+        "back" => {
+            line(&[(19., 12.), (5., 12.), (10., 7.)]);
+            line(&[(5., 12.), (10., 17.)]);
+        }
         "arrow" => {
             line(&[(5., 12.), (19., 12.), (14., 7.)]);
             line(&[(19., 12.), (14., 17.)]);
@@ -256,6 +260,7 @@ pub fn button(ui: &mut Ui, name: &str, tip: &str, size: f32, color: Color32) -> 
         ui.painter()
             .rect_stroke(r, 6, ui.visuals().selection.stroke, StrokeKind::Inside);
     }
-    draw(ui.painter(), r.shrink((size - 18.) / 2.), name, color);
+    let icon_size = if name == "pin-filled" { 22. } else { 18. };
+    draw(ui.painter(), r.shrink((size - icon_size) / 2.), name, color);
     res.on_hover_text(tip)
 }
