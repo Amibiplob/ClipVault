@@ -1,3 +1,7 @@
+# v2.2.0 signed integrated updates
+
+See [UPDATER.md](UPDATER.md) for detection, compatibility, system authorization, metadata generation, signing, key rotation and publication. Package scripts generate unsigned metadata and checksums for actual current-version artifacts; maintainer key provisioning, final signing and publication remain separate.
+
 # Linux packaging — ClipVault 2.1.0
 
 Run from the repository root (`app/` here). Debian/AppImage builds target Ubuntu
@@ -52,17 +56,40 @@ all logo sizes, launcher, AppStream metadata, notices and explicit dlopen librar
 dependencies; ELF scanning adds linked-library requirements from the actual
 Fedora binary. Release is exactly `1`, without a distribution suffix.
 
-On a host with Podman or Docker and network access:
+On a Linux Mint host, check Podman in the same terminal/environment that will run
+the build script. Only if the CLI is missing, install it locally with
+`sudo apt update` and `sudo apt install podman` (no desktop GUI is needed).
+
+```sh
+command -v podman
+podman --version
+podman info
+```
+
+Once both Podman checks succeed and network access is available:
 
 ```sh
 bash scripts/package-rpm.sh container --online
 ```
 
 This provisions `packaging/fedora/Containerfile` (Fedora 44), prepares the complete
-vendor archive, then builds/tests with container networking disabled. Set
-`CONTAINER_ENGINE=podman` or `docker` to select an engine. Pin the base image to a
+vendor archive, then builds/tests with container networking disabled. Podman is
+the default CLI; an explicit `CONTAINER_ENGINE=docker` override remains available.
+Pin the base image to a
 reviewed digest with `FEDORA_IMAGE=fedora@sha256:...` and record toolchain/system-package versions for reproducibility;
 mutable image tags alone do not guarantee identical package bytes.
+
+Fedora 44 uses `gdk-pixbuf2`; the obsolete `gdk-pixbuf2-modules` package must not
+be requested. Its required `glycin-libs` dependency requires `glycin-loaders`,
+which supplies the image-rs decoder for GIF/WebP thumbnails. The RPM spec already
+requires the GdkPixbuf library; its `webp-pixbuf-loader` recommendation is still a
+valid capability provided by `gdk-pixbuf2`. The RPM installation test runs
+`check-packaged-runtime.py` to decode actual GIF/WebP fixtures and exercise SQLite;
+dependency resolution and `rpm -Uvh` remain mandatory, without skip flags.
+Package metadata references: [gdk-pixbuf2](https://packages.fedoraproject.org/pkgs/gdk-pixbuf2/gdk-pixbuf2/fedora-44-updates.html),
+[glycin-libs](https://packages.fedoraproject.org/pkgs/glycin/glycin-libs/fedora-44.html),
+and [glycin-loaders](https://packages.fedoraproject.org/pkgs/glycin/glycin-loaders/fedora-44-updates.html);
+see also Glycin's [supported formats](https://gnome.pages.gitlab.gnome.org/glycin/).
 
 The native mode requires Fedora x86-64 and a prepared source archive:
 `python3 scripts/prepare-source.py --online`, then
@@ -73,20 +100,38 @@ screenshot launch and uninstall retaining fixture history. This does not prove
 real desktop capture/paste/shortcuts or an installed v2.0 upgrade.
 
 Expected output only after success: `dist/clipvault-2.1.0-1.x86_64.rpm`.
+The script prints the absolute output path after success and saves build output,
+including the actual failure and exit status, in a unique
+`dist/rpm-2.1.0-container-<UTC timestamp>-<unique id>.log` (or `native`) file.
+Earlier logs are preserved. Container preflight records the resolved CLI path,
+working directory, `--version`, `info` and both exit statuses before image builds.
+It copies the RPM
+to `dist/` after checksum validation and any required container installation tests.
 Install a verified Fedora package with
 `sudo dnf install ./clipvault-2.1.0-1.x86_64.rpm`.
-No RPM was produced here: rpmbuild, Podman/Docker and registry DNS are unavailable.
-Fedora installation/launch tests remain unrun. Other RPM distributions, including
+A previous sandbox retry found Podman installed, but it could not start the builder:
+`mkdir /run/user/1000/libpod: read-only file system`. A diagnostic with runtime
+and data directories under `target/podman/` instead reached a second restriction:
+`newuidmap: write to uid_map failed: Operation not permitted` (exit 125).
+No RPM was produced; Fedora compilation, package validation and installation/launch
+tests were not reached. See `dist/RPM-2.1.0-BUILD-RESULTS.txt` and the command logs
+in `dist/` for this retry. Retry on a host that permits rootless Podman user
+namespaces and writable runtime/storage directories; installing the CLI alone
+does not remove these environment restrictions. Administrator access here is
+also unavailable: sudo reports that the "no new privileges" flag prevents root
+access. Run the commands above and the build locally on the Linux Mint host.
+Other RPM distributions, including
 openSUSE, require separate dependency specs, builds and tests.
 
 ## Source PPA / APT publication
 
-The new `debian/` recipe targets Noble/Mint 22.x amd64 with Ubuntu's versioned
+The existing `debian/` recipe targets Noble/Mint 22.x (including 22.3) amd64 with Ubuntu's versioned
 Rust/Cargo 1.89 and offline Cargo vendoring. See
 [Launchpad source packaging and account setup](LAUNCHPAD-PPA.md) for reproducible
-preparation, clean builds, signing and dput. Complete source preparation is
-blocked here by uncached cross-target crates and missing tooling/network.
-No accepted source upload or working PPA installation command is claimed.
+preparation, clean builds, signing and `dput ppa:amibiplob/clipvault`. All owner
+signing/upload commands are explicitly marked for the regular Linux Mint Terminal.
+See [PPA verification](PPA-VERIFICATION.md) for current source artifact, toolchain
+and offline dependency results; no accepted upload or publication is claimed.
 
 The independent [signed binary APT workflow](APT-REPOSITORY.md) remains available
 and is distinct from Launchpad source builds. Manual candidate CI jobs have not

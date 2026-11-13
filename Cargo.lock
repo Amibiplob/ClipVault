@@ -337,7 +337,7 @@ dependencies = [
 
 [[package]]
 name = "clipvault"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "ab_glyph",
  "chrono",
@@ -346,6 +346,7 @@ dependencies = [
  "libc",
  "libloading",
  "reqwest",
+ "ring",
  "semver",
  "serde",
  "serde_json",

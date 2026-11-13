@@ -46,3 +46,32 @@ jobs:
           name: clipvault-unsigned-source-candidate
           path: target/ppa-source/clipvault_*.*
   # No release upload: candidates need distribution installation and paste acceptance.
+  signed-update-metadata:
+    needs: [build, fedora-rpm]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: clipvault-*-candidate*
+          merge-multiple: true
+          path: dist
+      - run: sudo apt-get update && sudo apt-get install -y rpm openssl
+      - name: Generate and sign final gathered artifact metadata
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.CLIPVAULT_UPDATE_SIGNING_KEY }}
+        run: |
+          test -n "$RELEASE_SIGNING_KEY" || { echo 'Maintainer Ed25519 signing setup is required; no signed metadata was produced.' >&2; exit 1; }
+          key_file="$RUNNER_TEMP/clipvault-ed25519.pem"
+          umask 077
+          trap 'rm -f -- "$key_file"' EXIT
+          printf '%s\n' "$RELEASE_SIGNING_KEY" > "$key_file"
+          python3 scripts/update-metadata.py --signing-key "$key_file"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clipvault-signed-update-metadata
+          path: |
+            dist/clipvault-update.json
+            dist/clipvault-update.json.sig
+            dist/v2.2.0-SHA256SUMS
+          if-no-files-found: error

@@ -18,7 +18,7 @@ async function release() {
     const response = await fetch(`https://api.github.com/repos/${config.repository}/releases/latest`, { signal: AbortSignal.timeout(7000) });
     if (!response.ok) throw Error('release lookup');
     const data = await response.json();
-    if (data.draft || data.prerelease || !/^v?\d+\.\d+\.\d+$/.test(data.tag_name)) throw Error('not stable');
+    if (data.draft || data.prerelease || !/^v?\.?\d+\.\d+\.\d+$/.test(data.tag_name)) throw Error('not stable');
     const base = `https://github.com/${config.repository}/releases/download/`;
     let count = 0;
     document.querySelectorAll('[data-format]').forEach(link => {
@@ -32,7 +32,7 @@ async function release() {
     });
     status.textContent = `Latest published release: ${data.tag_name}. ${count ? 'Available package links are shown below.' : 'Check GitHub Releases for package availability.'} The source upgrade shown here is ${config.version}.`;
   } catch (_) {
-    status.textContent = 'Release lookup unavailable. Use GitHub Releases below to see the packages actually published; v2.1.0 publication is not assumed.';
+    status.textContent = 'Release lookup unavailable. Use GitHub Releases below to see the packages actually published; v2.2.0 publication is not assumed.';
   }
 }
 release();

@@ -4,6 +4,7 @@ Version:        %{clipvault_version}
 Release:        1
 Summary:        Private native Linux clipboard history
 License:        MIT
+Distribution:   Fedora 44
 URL:            https://github.com/Amibiplob/ClipVault
 BuildArch:      x86_64
 Source0:        clipvault-%{version}.tar.xz

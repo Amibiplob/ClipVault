@@ -9,6 +9,7 @@ mod storage;
 mod ui;
 #[cfg(test)]
 mod ui_capture;
+mod updater;
 mod updates;
 mod wayland;
 use eframe::egui;

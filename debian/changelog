@@ -1,7 +1,17 @@
+clipvault (2.2.0-1~ppa1~noble1) noble; urgency=medium
+
+  * Improve history/image/settings layouts and prepare signed integrated Linux updates.
+
+ -- Md Biplob Hosain <amibiplob@users.noreply.github.com>  Fri, 13 Nov 2026 23:00:00 +0600
+
 clipvault (2.1.0-1~ppa1~noble1) noble; urgency=medium
 
   * Responsive settings, clearer pin state and clear-unpinned action.
   * Preserve existing history, pins, preferences and desktop integration.
   * Offline vendored build using Noble's versioned Rust 1.89 packages.
+  * Format authored website HTML and use Noble's pkgconf build dependency.
+  * Repack unused Windows winapi libraries and libloading DLL test fixtures;
+    retain locked dependency metadata, licenses and verified vendor checksums.
+  * Preserve checksummed vendor source during dh_clean and verify it before build.
 
  -- ClipVault Maintainer <maintainer@example.invalid>  Thu, 12 Nov 2026 12:00:00 +0000

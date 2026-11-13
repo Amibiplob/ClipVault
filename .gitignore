@@ -21,3 +21,14 @@ __pycache__/
 /.vscode/
 .DS_Store
 Thumbs.db
+
+# Signing material belongs in the user's external GnuPG home, never this tree.
+.gnupg/
+private-keys-v1.d/
+*.key
+*.pem
+*.p12
+*.pfx
+*.gpg
+*.kbx
+*.asc

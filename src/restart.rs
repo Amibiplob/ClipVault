@@ -16,7 +16,7 @@ pub fn request() {
 pub fn requested() -> bool {
     REQUESTED.load(Ordering::SeqCst)
 }
-fn probe(path: &std::path::Path, timeout: Duration) -> Result<semver::Version, String> {
+pub fn probe(path: &std::path::Path, timeout: Duration) -> Result<semver::Version, String> {
     let mut child = Command::new(path)
         .arg("--version")
         .stdin(Stdio::null())
@@ -119,9 +119,52 @@ pub fn exec_new() -> Result<(), String> {
     ))
 }
 
+/// Receipt is outside clipboard metadata. Completion is acknowledged only by the new app.
+pub fn save_receipt(root: &std::path::Path, version: &str) -> Result<(), String> {
+    use std::io::Write;
+    let path = root.join("update-restart.json.tmp");
+    let mut file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+    file.write_all(
+        &serde_json::to_vec(&serde_json::json!({"version":version})).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    file.sync_all().map_err(|e| e.to_string())?;
+    std::fs::rename(path, root.join("update-restart.json")).map_err(|e| e.to_string())
+}
+pub fn confirm_receipt(root: &std::path::Path) -> Result<bool, String> {
+    let path = root.join("update-restart.json");
+    let bytes = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e.to_string()),
+    };
+    let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    let matches = value["version"].as_str() == Some(env!("CARGO_PKG_VERSION"));
+    // Consume even a failed receipt to avoid restart loops; keep the old executable usable.
+    std::fs::remove_file(path).map_err(|e| e.to_string())?;
+    if matches {
+        Ok(true)
+    } else {
+        Err("Update restart did not start the expected version. Open the correct installed ClipVault executable manually; your saved data is preserved.".into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn restart_receipt_only_completes_in_expected_running_version_and_is_consumed() {
+        let root = std::env::temp_dir().join(format!("cv-receipt-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        assert!(!confirm_receipt(&root).unwrap());
+        save_receipt(&root, env!("CARGO_PKG_VERSION")).unwrap();
+        assert!(confirm_receipt(&root).unwrap());
+        assert!(!confirm_receipt(&root).unwrap());
+        save_receipt(&root, "99.0.0").unwrap();
+        assert!(confirm_receipt(&root).is_err());
+        assert!(!confirm_receipt(&root).unwrap());
+        std::fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn replacement_probe_is_bounded_and_requires_valid_version() {
         use std::os::unix::fs::PermissionsExt;

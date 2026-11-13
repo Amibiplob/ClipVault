@@ -3,7 +3,7 @@ Section: utils
 Priority: optional
 Maintainer: ClipVault Maintainer <maintainer@example.invalid>
 Build-Depends: debhelper-compat (= 13), rustc-1.89 (>= 1.89), cargo-1.89 (>= 1.89),
- pkg-config, python3, libsqlite3-0, libgdk-pixbuf-2.0-0, desktop-file-utils,
+ pkgconf, python3, libsqlite3-0, libgdk-pixbuf-2.0-0, desktop-file-utils,
  libwayland-dev, libxkbcommon-dev, libegl-dev, libgl-dev
 Standards-Version: 4.6.2
 Rules-Requires-Root: no

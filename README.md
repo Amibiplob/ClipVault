@@ -1,4 +1,4 @@
-# ClipVault 2.1.0
+# ClipVault 2.2.0
 
 <img src="assets/clipvault.svg" alt="ClipVault logo" width="70">
 
@@ -8,15 +8,15 @@
 
 The screenshot is an actual app capture, not an illustrative mockup. See [verification](V2.0.0-VERIFICATION.md) for capture provenance and its limits.
 
-Settings now use **← Back** (Back to clipboard history), responsive navigation and a scrollbar near the right edge. Larger filled accent pins identify pinned clips in both themes; pin clicks never copy or paste. See [v2.1.0 verification](V2.1.0-VERIFICATION.md) for current checks, artifact paths and limitations.
+Settings now use **← Back** (Back to clipboard history), responsive navigation and a scrollbar near the right edge. Larger filled accent pins identify pinned clips in both themes; pin clicks never copy or paste. See [v2.2.0 verification](V2.2.0-VERIFICATION.md) for current checks, artifact paths and limitations.
 
 ## Download and install
 
-Use [GitHub Releases](https://github.com/Amibiplob/ClipVault/releases) for packages actually published. This source upgrade is **2.1.0**; release publication is a separate step. The [website source](docs/index.html) looks up published package assets and falls back to Releases if lookup fails.
+Use [GitHub Releases](https://github.com/Amibiplob/ClipVault/releases) for packages actually published. This source upgrade is **2.2.0**; release publication is a separate step. The [website source](docs/index.html) looks up published package assets and falls back to Releases if lookup fails.
 
 - **.deb:** compatible Mint/Ubuntu/Debian-family systems. Open the downloaded file with your package installer, or `sudo apt install ./clipvault_VERSION-1_amd64.deb`.
 - **AppImage:** portable x86-64 option. Enable executable permission, then open it. If FUSE is unavailable, try `--appimage-extract-and-run`. Keep it in a stable location before setting shortcuts/startup; `bash scripts/install-appimage.sh` optionally installs a user-menu launcher.
-- **.rpm:** Fedora 44 source-build/container recipe prepared. No RPM has been built here because the build tools/container runtime and network are unavailable. After a verified Fedora build, install with `sudo dnf install ./clipvault-2.1.0-1.x86_64.rpm`; other RPM distributions require separate packages/tests.
+- **.rpm:** Fedora 44 source-build/container recipe prepared. No RPM has been built here because the build tools/container runtime and network are unavailable. After a verified Fedora build, install with `sudo dnf install ./clipvault-2.2.0-1.x86_64.rpm`; other RPM distributions require separate packages/tests.
 
 The current binary build baseline is **glibc 2.39, x86-64** (Mint 22.x / Ubuntu 24.04). AppImage does not make it compatible with older glibc. Consult the [compatibility table](COMPATIBILITY.md): native rendering and archive checks do not prove real-app paste, physical reboot, or installation on every desktop.
 
@@ -66,7 +66,21 @@ Pause monitoring before copying sensitive data. Phrase exclusions scan textual f
 
 ## Updates and troubleshooting
 
-Install a newer trusted package over the previous package; preserve the data folder. GitHub checking is optional/off by default and never installs packages. Installed-file replacement detection is separate: newer versions defer restart for edits/activation, flush storage and reuse single-instance startup. A manual restart may be required if detection/probing/relaunch fails. “What’s new” appears once per version and is deferred until opening when startup is hidden; reopen it in About.
+About → App updates shows the current/available versions, release notes and detected installation.
+Click Update to download the matching .deb, compatible Fedora-release .rpm or running AppImage.
+The updater uses executable package ownership and AppImage runtime information, matches the CPU,
+requires an Ed25519-signed manifest and checks SHA-256, package identity and version before installing.
+DEB/RPM installation requests system administrator authorization without collecting a password.
+Repository-managed installations use the system Update Manager. AppImages use atomic replacement
+with a rollback copy. Unknown installations, read-only locations, missing compatible packages or
+missing signatures offer official manual downloads. This candidate has no maintainer signing key
+configured, so automatic installation remains disabled pending that external setup.
+
+Progress and failures appear in About. Downloads can be canceled; system installation must finish.
+Restart waits for edits/paste and pending changes, flushes storage and preserves launch arguments,
+history, pins, settings, geometry and shortcuts. Completion is reported only by the expected new
+running version. App-only restarts do not trigger reboot cleanup. [Maintainer signing workflow,
+key rotation, compatibility and recovery](packaging/UPDATER.md).
 
 - **Shortcut unavailable:** use Shortcuts → Open Keyboard settings; review conflicts, or record a different combination. Verify the displayed command and actual desktop/session. A saved desktop action is not proof of activation.
 - **No history/capture:** resume monitoring, inspect Privacy exclusions, run `clipvault --diagnostics`, and check session protocol support. Copies made while ClipVault is stopped cannot be recovered.

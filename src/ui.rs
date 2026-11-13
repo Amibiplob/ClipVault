@@ -63,6 +63,11 @@ pub struct VaultApp {
     active_shortcut: Option<String>,
     shortcut_feedback: String,
     checker: crate::updates::Checker,
+    updater: crate::updater::Updater,
+    prepared_release: Option<String>,
+    restart_receipt_checked: bool,
+    texture_order: std::collections::VecDeque<String>,
+    image_metadata: HashMap<String, [u32; 2]>,
     update_outcome: Option<crate::updates::Outcome>,
     toast: Option<(String, Instant)>,
     last_cleanup: Instant,
@@ -230,6 +235,11 @@ impl VaultApp {
                 "Checking global shortcut registration…".into()
             },
             checker: Default::default(),
+            updater: Default::default(),
+            prepared_release: None,
+            restart_receipt_checked: false,
+            texture_order: Default::default(),
+            image_metadata: Default::default(),
             update_outcome,
             toast: None,
             last_cleanup: Instant::now(),
@@ -408,6 +418,8 @@ impl VaultApp {
             ctx.send_viewport_cmd(ViewportCommand::Visible(false));
             self.hidden = true;
             self.textures.clear();
+            self.texture_order.clear();
+            self.image_metadata.clear();
             self.text_cache = None;
             self.image_result = None;
             self.image_loading = None;
@@ -428,10 +440,24 @@ impl VaultApp {
         self.focus_search = true;
     }
     fn restart_safely(&mut self, ctx: &Context) {
-        if self.editor.is_some() || self.pending_activation.is_some() {
+        if self.quitting
+            || self.editor.is_some()
+            || self.pending_activation.is_some()
+            || self.pending_settings.is_some()
+            || self.updater.busy()
+        {
             return;
         }
         if self.mutate(|store| store.flush()) {
+            if let Some(version) = &self.replacement {
+                let root = self.store.lock().unwrap().root.clone();
+                if let Err(e) = crate::restart::save_receipt(&root, version) {
+                    self.error = Some(format!(
+                        "Cannot save update restart status: {e}. Restart manually."
+                    ));
+                    return;
+                }
+            }
             crate::restart::request();
             self.quit(ctx);
         } else {
@@ -440,6 +466,10 @@ impl VaultApp {
         }
     }
     fn quit(&mut self, ctx: &Context) {
+        if self.updater.busy() {
+            self.error = Some("An update is in progress. Cancel the download or wait for installation to finish before quitting.".into());
+            return;
+        }
         self.quitting = true;
         let _ = self.service.tx.send(Command::Stop);
         ctx.send_viewport_cmd(ViewportCommand::Close);
@@ -520,6 +550,51 @@ impl VaultApp {
     fn pin(&mut self, item: &Item) {
         self.mutate(|s| s.pin(&item.id));
     }
+    fn history_toolbar(&mut self, ui: &mut Ui, count: usize) {
+        let label = format!("{count} clips · Newest first");
+        let font = FontId::proportional(13.);
+        let button = ui.painter().layout_no_wrap(
+            "Clear unpinned".into(),
+            font.clone(),
+            ui.visuals().text_color(),
+        );
+        let padding = ui.spacing().button_padding;
+        let button_width = button.size().x + padding.x * 2.;
+        let button_height = (button.size().y + padding.y * 2.).max(ui.spacing().interact_size.y);
+        let scrollbar_gap = ui.spacing().scroll.bar_width + ui.spacing().scroll.bar_inner_margin;
+        let width = (ui.available_width() - scrollbar_gap).max(button_width + 45.);
+        let text_width = (width - button_width - 12.).max(35.);
+        let text = ui.painter().layout_job(egui::text::LayoutJob::simple(
+            label.clone(),
+            font,
+            muted(ui),
+            text_width,
+        ));
+        let height = text.size().y.max(button_height);
+        let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+        let origin = pos2(rect.left(), rect.center().y - text.size().y / 2.);
+        let response = ui.interact(
+            Rect::from_min_size(origin, text.size()),
+            Id::new("history-count"),
+            Sense::hover(),
+        );
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &label));
+        ui.painter().galley(origin, text, muted(ui));
+        let button_rect = Rect::from_min_size(
+            pos2(
+                rect.right() - button_width,
+                rect.center().y - button_height / 2.,
+            ),
+            vec2(button_width, button_height),
+        );
+        let mut action = ui.new_child(
+            UiBuilder::new()
+                .id_salt("history-clear-action")
+                .max_rect(button_rect)
+                .layout(Layout::left_to_right(Align::Center)),
+        );
+        self.clear_unpinned_button(&mut action);
+    }
     fn clear_unpinned_button(&mut self, ui: &mut Ui) {
         // Deliberately use the complete store, never the filtered list cache.
         let has_unpinned = self.store.lock().unwrap().items.iter().any(|i| !i.pinned);
@@ -559,6 +634,8 @@ impl VaultApp {
             self.preview = None;
             self.selected = None;
             self.textures.clear();
+            self.texture_order.clear();
+            self.image_metadata.clear();
             self.text_cache = None;
             self.image_result = None;
             self.image_loading = None;
@@ -615,16 +692,45 @@ impl VaultApp {
     }
     fn texture(&mut self, ctx: &Context, item: &Item) -> Option<TextureHandle> {
         if let Some(t) = self.textures.get(&item.id) {
+            self.texture_order.retain(|id| id != &item.id);
+            self.texture_order.push_back(item.id.clone());
             return Some(t.clone());
         }
-        let path = {
-            self.store
-                .lock()
-                .unwrap()
-                .root
-                .join(item.thumbnail.as_ref()?)
+        if self.image_errors.contains_key(&item.id) {
+            return None;
+        }
+        let path = self
+            .store
+            .lock()
+            .unwrap()
+            .root
+            .join(item.thumbnail.as_ref()?);
+        // List rows only decode persisted, bounded thumbnails, never original payloads.
+        let result = (|| -> Result<_, String> {
+            let mut reader = image::ImageReader::open(path)
+                .map_err(|e| e.to_string())?
+                .with_guessed_format()
+                .map_err(|e| e.to_string())?;
+            let mut limits = image::Limits::default();
+            limits.max_image_width = Some(480);
+            limits.max_image_height = Some(240);
+            limits.max_alloc = Some(2 * 1024 * 1024);
+            reader.limits(limits);
+            reader
+                .decode()
+                .map(|im| im.into_rgba8())
+                .map_err(|e| e.to_string())
+        })();
+        let im = match result {
+            Ok(im) => im,
+            Err(e) => {
+                if self.image_errors.len() >= 64 {
+                    self.image_errors.clear();
+                }
+                self.image_errors.insert(item.id.clone(), e);
+                return None;
+            }
         };
-        let im = image::open(path).ok()?.into_rgba8();
         let tex = ctx.load_texture(
             &item.id,
             ColorImage::from_rgba_unmultiplied(
@@ -633,9 +739,23 @@ impl VaultApp {
             ),
             TextureOptions::LINEAR,
         );
-        if self.textures.len() >= 16 {
-            self.textures.clear();
+        self.texture_order
+            .retain(|id| self.textures.contains_key(id));
+        while self.texture_order.len() >= 16 {
+            if let Some(old) = self.texture_order.pop_front() {
+                self.textures.remove(&old);
+                self.image_metadata.remove(&old);
+            }
         }
+        if item.kind == "Images" && item.image_dimensions.is_none() {
+            if let Some(original) = item.formats.iter().find(|f| f.mime.starts_with("image/")) {
+                let path = self.store.lock().unwrap().root.join(&original.file);
+                if let Ok((w, h)) = image::image_dimensions(path) {
+                    self.image_metadata.insert(item.id.clone(), [w, h]);
+                }
+            }
+        }
+        self.texture_order.push_back(item.id.clone());
         self.textures.insert(item.id.clone(), tex.clone());
         Some(tex)
     }
@@ -808,7 +928,8 @@ impl VaultApp {
         });
     }
     fn row(&mut self, ui: &mut Ui, ctx: &Context, item: &Item, _compact: bool) {
-        let height = 52.;
+        let is_image = item.kind == "Images";
+        let height = if is_image { 94. } else { 56. };
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
         let response = ui.interact(rect, Id::new(("clip-row", &item.id)), Sense::click());
         response
@@ -838,7 +959,15 @@ impl VaultApp {
             "Links" => "link",
             _ => "text",
         };
-        let tile = Rect::from_min_size(rect.min + vec2(10., 11.), vec2(30., 30.));
+        let tile_size = if is_image {
+            vec2(112., 74.)
+        } else {
+            vec2(30., 30.)
+        };
+        let tile = Rect::from_center_size(
+            pos2(rect.left() + 10. + tile_size.x / 2., rect.center().y),
+            tile_size,
+        );
         ui.painter()
             .rect_filled(tile, 7, ui.visuals().extreme_bg_color);
         if let Some(texture) = self.texture(ctx, item) {
@@ -851,14 +980,38 @@ impl VaultApp {
                 Color32::WHITE,
             );
         } else {
-            icons::draw(ui.painter(), tile.shrink(7.), icon, muted(ui));
+            icons::draw(
+                ui.painter(),
+                Rect::from_center_size(
+                    tile.center() - vec2(0., if is_image { 9. } else { 0. }),
+                    vec2(22., 22.),
+                ),
+                icon,
+                muted(ui),
+            );
+            if is_image {
+                ui.painter().text(
+                    tile.center() + vec2(0., 18.),
+                    Align2::CENTER_CENTER,
+                    "No preview",
+                    FontId::proportional(11.),
+                    muted(ui),
+                );
+            }
         }
-        let text_rect = Rect::from_min_max(rect.min + vec2(50., 7.), rect.max - vec2(84., 8.));
+        let text_left = tile.right() + 10.;
+        let text_rect = Rect::from_min_max(
+            pos2(text_left, rect.center().y - 21.),
+            rect.max - vec2(84., 8.),
+        );
         let title_width = text_rect.width().max(20.);
         let content = if matches!(item.kind.as_str(), "Text" | "Links") {
             item.preview.chars().take(240).collect::<String>()
-        } else if item.kind == "Images" && item.thumbnail.is_some() {
-            String::new()
+        } else if is_image {
+            item.image_dimensions
+                .or_else(|| self.image_metadata.get(&item.id).copied())
+                .map(|[w, h]| format!("Image · {w} × {h}"))
+                .unwrap_or_else(|| "Image".into())
         } else {
             item.title.clone()
         };
@@ -872,28 +1025,40 @@ impl VaultApp {
         job.wrap.break_anywhere = true;
         let galley = ui.painter().layout_job(job);
         ui.painter()
+            .with_clip_rect(text_rect.intersect(ui.clip_rect()))
             .galley(text_rect.min, galley, ui.visuals().text_color());
-        let timestamp = if let Some(time) = item.last_used {
+        let timestamp = if is_image {
+            item.copied_label()
+        } else if let Some(time) = item.last_used {
             format!("Last used {}", crate::storage::relative_time(time))
         } else if item.captured_at.is_none() {
             "Capture time unknown".into()
         } else {
             item.copied_label()
         };
-        ui.painter().text(
-            rect.min + vec2(50., 32.),
-            Align2::LEFT_TOP,
-            &timestamp,
-            FontId::proportional(11.),
-            muted(ui),
-        );
+        ui.painter()
+            .with_clip_rect(text_rect.intersect(ui.clip_rect()))
+            .text(
+                pos2(text_left, rect.center().y + 6.),
+                Align2::LEFT_TOP,
+                &timestamp,
+                FontId::proportional(11.),
+                muted(ui),
+            );
+        response.widget_info(|| {
+            WidgetInfo::labeled(
+                WidgetType::Button,
+                ui.is_enabled(),
+                format!("{content}. {timestamp}"),
+            )
+        });
         response.clone().on_hover_text(item.exact_times());
         let controls_width = 72.;
         let mut child = ui.new_child(
             UiBuilder::new()
                 .id_salt(&item.id)
                 .max_rect(Rect::from_min_size(
-                    pos2(rect.right() - controls_width - 6., rect.top() + 10.),
+                    pos2(rect.right() - controls_width - 6., rect.center().y - 16.),
                     vec2(controls_width, 32.),
                 ))
                 .layout(Layout::left_to_right(Align::Center)),
@@ -1142,22 +1307,38 @@ impl VaultApp {
         }
     }
     fn settings_navigation(&mut self, ui: &mut Ui) {
-        // Draw the arrow so fonts without U+2190 remain readable.
-        let back = ui
-            .button("    Back")
-            .on_hover_text("Back to clipboard history");
+        let label = ui.painter().layout_no_wrap(
+            "Back".into(),
+            FontId::proportional(13.),
+            ui.visuals().text_color(),
+        );
+        let (rect, back) = ui.allocate_exact_size(
+            vec2(label.size().x + 50., label.size().y.max(18.) + 16.),
+            Sense::click(),
+        );
+        if back.hovered() || back.has_focus() {
+            ui.painter()
+                .rect_filled(rect, 6., ui.visuals().widgets.hovered.bg_fill);
+        }
+        if back.has_focus() {
+            ui.painter()
+                .rect_stroke(rect, 6., ui.visuals().selection.stroke, StrokeKind::Inside);
+        }
         icons::draw(
             ui.painter(),
-            Rect::from_center_size(
-                pos2(back.rect.left() + 15., back.rect.center().y),
-                vec2(18., 18.),
-            ),
+            Rect::from_center_size(pos2(rect.left() + 18., rect.center().y), vec2(18., 18.)),
             "back",
+            ui.visuals().text_color(),
+        );
+        ui.painter().galley(
+            pos2(rect.left() + 36., rect.center().y - label.size().y / 2.),
+            label,
             ui.visuals().text_color(),
         );
         back.widget_info(|| {
             WidgetInfo::labeled(WidgetType::Button, true, "Back to clipboard history")
         });
+        let back = back.on_hover_text("Back to clipboard history");
         if back.clicked() {
             self.settings_open = false;
             self.preview = None;
@@ -1407,7 +1588,7 @@ impl VaultApp {
         });
     }
     fn start_update_check(&mut self, ctx: &Context, automatic: bool) {
-        if self.checker.running() {
+        if self.checker.running() || self.updater.busy() {
             return;
         }
         let timestamp = now();
@@ -1440,9 +1621,38 @@ impl VaultApp {
             return;
         }
         self.update_outcome = None;
+        self.prepared_release = None;
+        self.updater.plan = None;
         self.checker.start(automatic, ctx.clone());
     }
     fn poll_updates(&mut self, ctx: &Context) {
+        if self.shot.is_none() {
+            self.updater.initialize(ctx);
+        }
+        self.updater.poll();
+        if !self.restart_receipt_checked && !self.updater.busy() {
+            self.restart_receipt_checked = true;
+            let root = self.store.lock().unwrap().root.clone();
+            match crate::restart::confirm_receipt(&root) {
+                Ok(true) => self.updater.state = crate::updater::State::Completed,
+                Err(e) => self.error = Some(e),
+                _ => {}
+            }
+        }
+        if let crate::updater::State::RestartRequired(v) = &self.updater.state {
+            self.replacement = Some(v.clone());
+        }
+        if !self.updater.busy() {
+            if let Some(crate::updates::Outcome::Available { version, url, .. }) =
+                &self.update_outcome
+            {
+                if self.prepared_release.as_ref() != Some(version) {
+                    self.prepared_release = Some(version.clone());
+                    self.updater.prepare(version.clone(), url.clone(), ctx);
+                }
+            }
+        }
+
         if let Some(result) = self.checker.poll() {
             let mut prefs = self.store.lock().unwrap().settings.updates.clone();
             match result {
@@ -1566,19 +1776,11 @@ impl VaultApp {
             "about before links {:?}",
             ui.min_rect()
         );
-        if ui.available_width() >= 500. {
-            for row in links.chunks(2) {
-                ui.columns(2, |cols| {
-                    for (col, link) in cols.iter_mut().zip(row) {
-                        link_card(col, *link);
-                    }
-                });
-            }
-        } else {
+        ui.horizontal_wrapped(|ui| {
             for link in links {
                 link_card(ui, link);
             }
-        }
+        });
         ui.add_space(12.);
         debug_assert!(
             ui.min_rect().is_finite(),
@@ -1591,19 +1793,19 @@ impl VaultApp {
             ui.label(format!("Installed version: {}", env!("CARGO_PKG_VERSION")));
             let prefs = &settings.updates;
             let cooldown = now() < prefs.retry_after || prefs.last_attempt.is_some_and(|t| now().saturating_sub(t) < 30);
-            if ui.add_enabled(!self.checker.running() && !cooldown, Button::new(if self.checker.running() { "Checking for updates…" } else { "Check for updates" })).clicked() {
+            if ui.add_enabled(!self.checker.running() && !self.updater.busy() && !cooldown, Button::new(if self.checker.running() { "Checking for updates…" } else { "Check for updates" })).clicked() {
                 self.start_update_check(ctx, false);
                 settings.updates = self.store.lock().unwrap().settings.updates.clone();
             }
             ui.checkbox(&mut settings.updates.automatic, "Automatically check once a day");
-            ui.label(RichText::new("Optional and off by default. Updates are installed manually.").color(muted(ui)));
+            ui.label(RichText::new("Optional and off by default. Installation always requires your Update click.").color(muted(ui)));
             if let Some(t) = settings.updates.last_attempt {
                 let date = chrono::DateTime::from_timestamp(t, 0).map(|t| t.format("%Y-%m-%d %H:%M UTC").to_string()).unwrap_or_else(|| "Unknown time".into());
                 ui.label(RichText::new(format!("Last check: {date}")).color(muted(ui)));
                 ui.label(if self.checker.running() { "Checking for updates…" } else if settings.updates.last_status == "Checking for updates…" { "Unable to check; try again. The previous check was interrupted." } else { &settings.updates.last_status });
             } else { ui.label(RichText::new("No update check yet.").color(muted(ui))); }
             if cooldown && !self.checker.running() { ui.label(RichText::new("Please wait before checking again.").color(muted(ui))); }
-            if let Some(crate::updates::Outcome::Available { version, url }) = self.update_outcome.clone() {
+            if let Some(crate::updates::Outcome::Available { version, url, notes }) = self.update_outcome.clone() {
                 ui.horizontal_wrapped(|ui| {
                     if ui.button("View release / Download").clicked() && crate::updates::official_release(&url) { ctx.open_url(OpenUrl::new_tab(url)); }
                     if settings.updates.dismissed_version.as_deref() != Some(&version) && ui.button("Remind me later").clicked() {
@@ -1611,8 +1813,29 @@ impl VaultApp {
                     }
                 });
                 if settings.updates.dismissed_version.as_deref() == Some(&version) { ui.label(RichText::new("Reminder dismissed for this release. You can still download it above.").color(muted(ui))); }
-                ui.label("Choose the .deb or AppImage on GitHub and install it yourself. ClipVault never downloads or installs updates.");
+                ui.label(format!("Available version: {version}"));
+                CollapsingHeader::new("Release notes").default_open(true).show(ui, |ui| {
+                    ui.add(Label::new(if notes.is_empty() { "Release notes are available on the release page." } else { &notes }).wrap());
+                });
+                if ui.add_enabled(self.updater.plan.is_some() && !self.updater.busy() && matches!(self.updater.state, crate::updater::State::Ready | crate::updater::State::Failed(_) | crate::updater::State::Cancelled), Button::new("Update")).clicked() { self.updater.install(ctx); }
+
             }
+            if let Some(i) = &self.updater.installation {
+                ui.add(Label::new(format!("Detected installation: {}", i.label())).wrap());
+                if i.repository_managed { ui.label("Use your system Update Manager for this repository-managed installation."); }
+            }
+            ui.add(Label::new(self.updater.state.message()).wrap());
+            if self.updater.state.critical() { ui.label("Please wait for the system operation to finish; cancellation is no longer safe."); }
+            if let crate::updater::State::Downloading { received, total } = self.updater.state {
+                ui.add(ProgressBar::new(received as f32 / total.max(1) as f32).show_percentage());
+            }
+            if self.updater.busy() && self.updater.state.cancellable() && ui.button("Cancel update").clicked() { self.updater.cancel(); }
+            if matches!(self.updater.state, crate::updater::State::Failed(_) | crate::updater::State::Cancelled) && !self.updater.busy() && ui.button("Retry update").clicked() {
+                if self.updater.plan.is_some() { self.updater.install(ctx); } else { self.prepared_release = None; }
+            }
+            if !self.updater.busy() && matches!(self.updater.state, crate::updater::State::Failed(_)) && self.updater.plan.as_ref().is_some_and(|p| p.artifact.package == crate::updater::Package::Appimage) && ui.button("Save new AppImage to another location…").clicked() { self.updater.save_appimage(ctx); }
+            if self.replacement.is_some() && ui.add_enabled(!self.updater.busy() && self.editor.is_none(), Button::new("Restart ClipVault")).clicked() { self.restart_safely(ctx); }
+            ui.hyperlink_to("Manual downloads: .deb · Fedora RPM · AppImage", "https://github.com/Amibiplob/ClipVault/releases");
             ui.add_space(4.);
             ui.label(RichText::new("Clipboard history stays on this device. Checking for updates contacts GitHub. Clipboard content is never sent.").color(muted(ui)));
         });
@@ -1708,7 +1931,7 @@ impl VaultApp {
             ScrollArea::vertical()
                 .max_height((ctx.screen_rect().height() - 180.).max(100.))
                 .show(ui, |ui| {
-                    ui.add(Label::new(include_str!("../CHANGELOG-v2.1.0.txt")).wrap());
+                    ui.add(Label::new(include_str!("../CHANGELOG-v2.2.0.txt")).wrap());
                 });
             if ui.button("Done").clicked() {
                 self.dismiss_changelog();
@@ -1721,6 +1944,16 @@ impl VaultApp {
         ctx: &Context,
         items: &[Item],
     ) -> scroll_area::ScrollAreaOutput<()> {
+        let gap = ui.spacing().item_spacing.y;
+        let mut offsets = vec![0_f32];
+        for item in items {
+            offsets.push(
+                offsets.last().copied().unwrap()
+                    + if item.kind == "Images" { 94. } else { 56. }
+                    + gap,
+            );
+        }
+        let total = (offsets.last().copied().unwrap_or(0.) - gap).max(0.);
         let mut scroll = ScrollArea::vertical().id_salt("history");
         if self.scroll_to_selected {
             self.scroll_to_selected = false;
@@ -1728,20 +1961,31 @@ impl VaultApp {
                 .iter()
                 .position(|item| self.selected.as_deref() == Some(&item.id))
             {
-                scroll = scroll.vertical_scroll_offset(
-                    (index as f32 * 61. - ui.available_height() / 2.).max(0.),
-                );
+                scroll = scroll
+                    .vertical_scroll_offset((offsets[index] - ui.available_height() / 2.).max(0.));
             }
         }
         scroll
             .scroll_bar_visibility(scroll_area::ScrollBarVisibility::AlwaysVisible)
             .auto_shrink([false, false])
-            .show_rows(ui, 52., items.len(), |ui, range| {
-                for item in &items[range] {
+            .show_viewport(ui, |ui, viewport| {
+                ui.set_min_height(total);
+                let start = offsets
+                    .partition_point(|&y| y < viewport.min.y)
+                    .saturating_sub(1)
+                    .min(items.len());
+                let end = offsets
+                    .partition_point(|&y| y <= viewport.max.y)
+                    .min(items.len());
+                if start > 0 {
+                    ui.add_space(offsets[start]);
+                }
+                for item in &items[start..end] {
                     self.row(ui, ctx, item, true);
                 }
             })
     }
+
     fn render(&mut self, ctx: &Context) {
         if let Some(item) = &self.preview {
             let current = {
@@ -1989,8 +2233,7 @@ impl VaultApp {
                 if self.settings_open{self.settings(ui,ctx);return;}
                 if let Some(item)=self.preview.clone(){self.detail(ui,ctx,&item,true);return;}
                 self.search(ui);ui.separator();
-                ui.horizontal_wrapped(|ui|{ui.label(RichText::new(format!("{} clips · Newest first",items.len())).color(muted(ui)));self.clear_unpinned_button(ui);});
-                if !query.is_empty() || self.category != "All" { ui.label(RichText::new("Clear unpinned applies to all history, including hidden clips.").color(muted(ui))); }
+                self.history_toolbar(ui, items.len());
                 if let Some(version)=self.replacement.clone(){
                     ui.label(format!("An installed update ({version}) is ready. Close the panel to restart safely. Unsaved edits are kept open."));
                     if ui.button("Restart now").clicked() && self.editor.is_none(){self.restart_safely(ctx);}
@@ -2049,6 +2292,7 @@ impl eframe::App for VaultApp {
             && self.pending_settings.is_none()
             && self.pending_activation.is_none()
             && !self.shortcut_recording
+            && !self.updater.busy()
         {
             self.restart_safely(ctx);
         }
@@ -2207,7 +2451,12 @@ fn keycap(ui: &mut Ui, key: &str) {
 }
 fn link_card(ui: &mut Ui, link: (&str, &str, &str, &str)) {
     let (icon, title, description, url) = link;
-    let (r, response) = ui.allocate_exact_size(vec2(ui.available_width(), 60.), Sense::click());
+    let text = ui.painter().layout_no_wrap(
+        title.into(),
+        FontId::proportional(13.),
+        ui.visuals().text_color(),
+    );
+    let (r, response) = ui.allocate_exact_size(vec2(text.size().x + 56., 38.), Sense::click());
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Link, true, title));
     let fill = if response.hovered() || response.has_focus() {
         ui.visuals().widgets.hovered.bg_fill
@@ -2225,7 +2474,7 @@ fn link_card(ui: &mut Ui, link: (&str, &str, &str, &str)) {
         ui.painter()
             .rect_stroke(r, 8, ui.visuals().selection.stroke, StrokeKind::Inside);
     }
-    let icon_rect = Rect::from_min_size(r.min + vec2(12., 21.), vec2(18., 18.));
+    let icon_rect = Rect::from_min_size(pos2(r.left() + 10., r.center().y - 9.), vec2(18., 18.));
     if icon == "github" || icon == "linkedin" {
         let id = Id::new(("brand-texture", icon));
         let texture = ui
@@ -2257,32 +2506,17 @@ fn link_card(ui: &mut Ui, link: (&str, &str, &str, &str)) {
     } else {
         icons::draw(ui.painter(), icon_rect, icon, ui.visuals().hyperlink_color);
     }
-    ui.painter().text(
-        r.min + vec2(40., 13.),
-        Align2::LEFT_TOP,
-        title,
-        FontId::proportional(13.),
+    ui.painter().galley(
+        pos2(r.left() + 36., r.center().y - text.size().y / 2.),
+        text,
         ui.visuals().text_color(),
-    );
-    ui.painter().text(
-        r.min + vec2(40., 34.),
-        Align2::LEFT_TOP,
-        description,
-        FontId::proportional(11.),
-        muted(ui),
-    );
-    icons::draw(
-        ui.painter(),
-        Rect::from_min_size(pos2(r.max.x - 28., r.center().y - 7.), vec2(14., 14.)),
-        "external",
-        ui.visuals().hyperlink_color,
     );
     if response.clicked() {
         ui.ctx().open_url(OpenUrl::new_tab(url));
     }
     response
         .on_hover_cursor(CursorIcon::PointingHand)
-        .on_hover_text(url);
+        .on_hover_text(format!("{description}\n{url}"));
 }
 fn heading(ui: &mut Ui, title: &str, subtitle: &str) {
     ui.label(RichText::new(title).strong().size(19.));
@@ -2997,7 +3231,12 @@ mod tests {
             };
             app.store.lock().unwrap().settings.hide_after_copy = true;
             app.store.lock().unwrap().settings.compact = false;
-            click_row(&mut app, &ctx, &item, pos2(366., 35.));
+            click_row(
+                &mut app,
+                &ctx,
+                &item,
+                pos2(366., if image { 55. } else { 36. }),
+            );
             assert!(
                 app.store
                     .lock()
@@ -3009,7 +3248,12 @@ mod tests {
                     .pinned
             );
             assert!(rx.try_recv().is_err(), "row pin must not bubble into copy");
-            click_row(&mut app, &ctx, &item, pos2(414., 35.));
+            click_row(
+                &mut app,
+                &ctx,
+                &item,
+                pos2(414., if image { 55. } else { 36. }),
+            );
             assert!(rx.try_recv().is_err(), "opening the row menu must not copy");
             app.preview = Some(item.clone());
             if !image {
@@ -3413,7 +3657,7 @@ mod tests {
         frame(&mut app, &ctx);
         assert!(app.changelog_open);
         let output = frame(&mut app, &ctx);
-        text_position(&output, "What’s New in ClipVault v2.1.0");
+        text_position(&output, "What’s New in ClipVault v2.2.0");
         let output = frame(&mut app, &ctx);
         click_at(&ctx, text_position(&output, "Done"), |ctx| app.render(ctx));
         assert!(!app.changelog_open);
@@ -3689,9 +3933,7 @@ mod tests {
         for _ in 0..2 {
             output = frame(&mut app, &ctx);
         }
-        click_at(&ctx, text_position(&output, "    Back"), |ctx| {
-            app.render(ctx)
-        });
+        click_at(&ctx, text_position(&output, "Back"), |ctx| app.render(ctx));
         assert!(!app.settings_open);
         assert!(app.preview.is_none());
         assert!(rx.try_recv().is_err());
@@ -3722,10 +3964,7 @@ mod tests {
             app.category = "Pinned".into();
             app.query = "No matching clip".into();
             let output = frame(&mut app, &ctx);
-            text_position(
-                &output,
-                "Clear unpinned applies to all history, including hidden clips.",
-            );
+            assert!(!output.shapes.iter().any(|s| matches!(&s.shape, Shape::Text(t) if t.galley.job.text == "Clear unpinned applies to all history, including hidden clips.")), "scope explanation belongs in tooltip and confirmation");
             click_at(&ctx, text_position(&output, "Clear unpinned"), |ctx| {
                 app.render(ctx)
             });
@@ -3908,6 +4147,227 @@ mod tests {
                 }
             }
         }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn v220_external_replacement_cannot_restart_during_update_or_unsaved_edit() {
+        let (mut app, rx, root) = app();
+        let ctx = Context::default();
+        app.replacement = Some("9.0.0".into());
+        let item = app.store.lock().unwrap().items[0].clone();
+        app.editor = Some((item, "unsaved edit".into()));
+        app.restart_safely(&ctx);
+        assert!(!app.quitting);
+        assert!(app.editor.is_some());
+        app.editor = None;
+        app.updater.initialize(&ctx);
+        assert!(app.updater.busy());
+        app.restart_safely(&ctx);
+        assert!(!app.quitting);
+        assert!(rx.try_recv().is_err());
+        assert!(!root.join("update-restart.json").exists());
+        assert_eq!(Store::open(root.clone()).unwrap().items.len(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn v220_toolbar_back_and_about_links_align_at_large_fonts() {
+        let (mut app, rx, root) = app();
+        for width in [280., 440., 820.] {
+            for zoom in [1., 22. / 14.] {
+                for dark in [false, true] {
+                    let ctx = Context::default();
+                    crate::fonts::apply(&ctx, "", &[]);
+                    ctx.set_visuals(if dark {
+                        Visuals::dark()
+                    } else {
+                        Visuals::light()
+                    });
+                    ctx.set_zoom_factor(zoom);
+                    ctx.style_mut(|s| {
+                        s.spacing.button_padding = vec2(11., 8.);
+                        s.spacing.scroll = egui::style::ScrollStyle::solid();
+                    });
+                    let mut textures = HashMap::new();
+                    for pass in 0..3 {
+                        let output = ctx.run(
+                            RawInput {
+                                screen_rect: Some(Rect::from_min_size(
+                                    Pos2::ZERO,
+                                    vec2(width, 540.),
+                                )),
+                                ..Default::default()
+                            },
+                            |ctx| {
+                                CentralPanel::default().show(ctx, |ui| {
+                                    app.history_toolbar(ui, 24);
+                                    ui.separator();
+                                    app.settings_navigation(ui);
+                                    ui.separator();
+                                    ui.horizontal_wrapped(|ui| {
+                                        for link in [
+                                            (
+                                                "github",
+                                                "GitHub",
+                                                "GitHub",
+                                                "https://github.com/Amibiplob",
+                                            ),
+                                            (
+                                                "linkedin",
+                                                "LinkedIn",
+                                                "LinkedIn",
+                                                "https://linkedin.com/in/amibiplob",
+                                            ),
+                                            (
+                                                "globe",
+                                                "Portfolio",
+                                                "Portfolio",
+                                                "https://amibiplob.vercel.app",
+                                            ),
+                                            (
+                                                "code",
+                                                "Source code",
+                                                "Source code",
+                                                "https://github.com/Amibiplob/ClipVault",
+                                            ),
+                                        ] {
+                                            link_card(ui, link);
+                                        }
+                                    });
+                                });
+                            },
+                        );
+                        if pass == 2 {
+                            let texts: Vec<_> = output
+                                .shapes
+                                .iter()
+                                .filter_map(|s| {
+                                    if let Shape::Text(t) = &s.shape {
+                                        Some(t)
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
+                            let count = texts
+                                .iter()
+                                .find(|t| t.galley.job.text == "24 clips · Newest first")
+                                .unwrap();
+                            let clear = texts
+                                .iter()
+                                .find(|t| t.galley.job.text == "Clear unpinned")
+                                .unwrap();
+                            assert!(
+                                count.pos.x + count.galley.size().x + 6. <= clear.pos.x,
+                                "toolbar overlap at {width}/{zoom}"
+                            );
+                            assert!(
+                                (count.pos.y + count.galley.size().y / 2.
+                                    - clear.pos.y
+                                    - clear.galley.size().y / 2.)
+                                    .abs()
+                                    < 2.,
+                                "toolbar center at {width}/{zoom}"
+                            );
+                            for text in &texts {
+                                assert!(
+                                    text.pos.x + text.galley.size().x
+                                        <= ctx.screen_rect().right() + 1.,
+                                    "clipped label {} at {width}/{zoom}",
+                                    text.galley.job.text
+                                );
+                            }
+                            let github = texts
+                                .iter()
+                                .find(|t| t.galley.job.text == "GitHub")
+                                .unwrap();
+                            let linkedin = texts
+                                .iter()
+                                .find(|t| t.galley.job.text == "LinkedIn")
+                                .unwrap();
+                            if width >= 440. {
+                                assert!(
+                                    (github.pos.y - linkedin.pos.y).abs() < 1.,
+                                    "links should share a row"
+                                );
+                            }
+                            if width == 820. {
+                                let portfolio = texts
+                                    .iter()
+                                    .find(|t| t.galley.job.text == "Portfolio")
+                                    .unwrap();
+                                assert!((github.pos.y - portfolio.pos.y).abs() < 1.);
+                            }
+                        }
+                        if width == 440. && zoom == 1. {
+                            crate::ui_capture::capture(
+                                &ctx,
+                                output,
+                                &mut textures,
+                                [440, 540],
+                                &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                                    .join(format!("target/v2.2.0/layout-{dark}.png")),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert!(rx.try_recv().is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn v220_image_rows_have_recognizable_preview_metadata_and_bounded_cache() {
+        let (mut app, rx, root) = app();
+        let ctx = Context::default();
+        let item = saved_image(&mut app);
+        let output = ctx.run(
+            RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(440., 420.))),
+                ..Default::default()
+            },
+            |ctx| {
+                CentralPanel::default().show(ctx, |ui| app.row(ui, ctx, &item, true));
+            },
+        );
+        text_position(&output, "Image · 23 × 17");
+        let texture = app.textures[&item.id].id();
+        let image = output
+            .shapes
+            .iter()
+            .find_map(|s| {
+                if let Shape::Mesh(m) = &s.shape {
+                    (m.texture_id == texture).then_some(m.calc_bounds())
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        assert!(image.width() >= 90. && image.height() >= 60.);
+        assert!((image.width() / image.height() - 23. / 17.).abs() < 0.01);
+        for n in 0..40 {
+            let mut row = item.clone();
+            row.id = format!("cache-{n}");
+            assert!(app.texture(&ctx, &row).is_some());
+            assert!(app.textures.len() <= 16);
+        }
+        assert!(
+            app.image_loading.is_none(),
+            "list must not start a full resolution decode"
+        );
+        let mut broken = item.clone();
+        broken.id = "broken".into();
+        broken.thumbnail = Some("items/missing.png".into());
+        let output = ctx.run(
+            RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(440., 420.))),
+                ..Default::default()
+            },
+            |ctx| {
+                CentralPanel::default().show(ctx, |ui| app.row(ui, ctx, &broken, true));
+            },
+        );
+        text_position(&output, "No preview");
+        assert!(rx.try_recv().is_err());
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]

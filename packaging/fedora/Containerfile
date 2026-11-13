@@ -3,6 +3,6 @@ FROM ${FEDORA_IMAGE}
 RUN dnf install -y rpm-build rust cargo gcc gcc-c++ pkgconf-pkg-config python3 \
     libxkbcommon-devel wayland-devel mesa-libGL-devel mesa-libEGL-devel \
     libX11 libX11-xcb libXcursor libXi libXrandr libXinerama libXrender libXfixes libXext \
-    libxkbcommon-x11 libxcb sqlite-libs gdk-pixbuf2 gdk-pixbuf2-modules \
+    libxkbcommon-x11 libxcb sqlite-libs gdk-pixbuf2 \
     xkeyboard-config fontconfig desktop-file-utils xorg-x11-server-Xvfb xorg-x11-xauth && dnf clean all
 WORKDIR /build

@@ -1,3 +1,9 @@
+# Current feature update: 2.2.0
+
+See [V2.2.0-VERIFICATION.md](../V2.2.0-VERIFICATION.md) for current checks, artifact paths and remaining installation/desktop limitations, and [UPDATER.md](UPDATER.md) for release-signing setup. Earlier results below are historical.
+
+---
+
 # Current feature update: 1.2.0
 
 See [V1.2.0-VERIFICATION.md](../V1.2.0-VERIFICATION.md) for current evidence and remaining desktop checks. Earlier verification below is historical.

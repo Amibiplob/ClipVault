@@ -74,3 +74,5 @@ fi
 if [[ $mode != stage ]]; then
     (cd dist && find . -maxdepth 1 -type f \( -name '*.deb' -o -name '*.AppImage' \) -print0 | sort -z | xargs -0 -r sha256sum > SHA256SUMS)
 fi
+
+if [[ $mode != stage ]]; then python3 scripts/update-metadata.py; fi

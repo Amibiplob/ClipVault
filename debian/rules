@@ -13,6 +13,7 @@ CARGO = /usr/bin/cargo-1.89
 override_dh_auto_configure:
 	test -d vendor
 	test -s .cargo/config.toml
+	python3 scripts/repack-ppa-vendor.py --verify .
 	$(RUSTC) --version
 	$(CARGO) --version
 
@@ -30,3 +31,8 @@ override_dh_auto_install:
 
 override_dh_auto_clean:
 	rm -rf target debian/cargo-home
+
+override_dh_clean:
+	# Vendor *.orig files are upstream source covered by Cargo's file checksums.
+	# dh_clean's default recursive backup-file removal must not delete them.
+	dh_clean -Xvendor/

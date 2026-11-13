@@ -35,6 +35,8 @@ pub struct Item {
     pub pinned: bool,
     pub formats: Vec<Format>,
     pub thumbnail: Option<String>,
+    #[serde(default)]
+    pub image_dimensions: Option<[u32; 2]>,
     pub source: String,
 }
 impl Item {
@@ -538,6 +540,7 @@ impl Store {
         }
         let kind = classify(data, &preview);
         let mut thumbnail = None;
+        let mut image_dimensions = None;
         if kind == "Images" {
             for (mime, b) in data {
                 if mime.starts_with("image/") {
@@ -548,6 +551,7 @@ impl Store {
                         .map_err(|e| e.to_string())?;
                     reader.limits(limits);
                     if let Ok(im) = reader.decode() {
+                        image_dimensions = Some([im.width(), im.height()]);
                         let p = format!("items/{id}/thumb.png");
                         let _ = im.thumbnail(480, 240).save(self.root.join(&p));
                         thumbnail = Some(p);
@@ -601,6 +605,7 @@ impl Store {
             pinned: false,
             formats,
             thumbnail,
+            image_dimensions,
             source: source.into(),
         };
         // Flush payloads before committing metadata, including on sudden power loss.

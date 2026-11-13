@@ -140,8 +140,8 @@ def stage():
         copy(ROOT / f"assets/icons/{size}x{size}/clipvault.png", f"usr/share/icons/hicolor/{size}x{size}/apps/clipvault.png")
     (APPDIR / "clipvault.svg").symlink_to("usr/share/icons/hicolor/scalable/apps/clipvault.svg")
     (APPDIR / ".DirIcon").symlink_to("clipvault.svg")
-    for name in ["COMPATIBILITY.md", "PERFORMANCE.md", "MIGRATION.md", "CHANGELOG.md", "LICENSE", "THIRD-PARTY-NOTICES.txt", "README.md", "RELEASE-NOTES.md", "VERIFICATION.md", "ACTIVATION-VERIFICATION.md", "FEATURE-VERIFICATION.md", "V2.1.0-VERIFICATION.md", "CHANGELOG-v2.1.0.txt"]:
-        copy(ROOT / name, "usr/share/doc/clipvault/" + name)
+    for name in ["COMPATIBILITY.md", "PERFORMANCE.md", "MIGRATION.md", "CHANGELOG.md", "LICENSE", "THIRD-PARTY-NOTICES.txt", "README.md", "RELEASE-NOTES.md", "VERIFICATION.md", "ACTIVATION-VERIFICATION.md", "FEATURE-VERIFICATION.md", "V2.1.0-VERIFICATION.md", "CHANGELOG-v2.1.0.txt", "CHANGELOG-v2.2.0.txt", "V2.2.0-VERIFICATION.md", "packaging/UPDATER.md"]:
+        copy(ROOT / name, "usr/share/doc/clipvault/" + pathlib.Path(name).name)
     copy(ROOT / "packaging/linux/io.clipvault.desktop.metainfo.xml", "usr/share/metainfo/io.clipvault.desktop.metainfo.xml")
     copy(ROOT / "packaging/LAUNCHPAD-PPA.md", "usr/share/doc/clipvault/LAUNCHPAD-PPA.md")
     copy(ROOT / "packaging/APT-REPOSITORY.md", "usr/share/doc/clipvault/APT-REPOSITORY.md")

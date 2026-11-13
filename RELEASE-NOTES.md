@@ -1,9 +1,12 @@
-# ClipVault v2.1.0
+# ClipVault 2.2.0
 
-Settings now provide ← Back, responsive navigation/content and a scrollbar close to the right edge. Pinned clips use a larger filled accent icon with contrast in both themes. Clear unpinned states its global scope, keeps pins, disables when no unpinned clips remain, and follows Confirm before deleting.
+ClipVault 2.2.0
+• History toolbar separates clip count and Clear unpinned, with hidden-filter scope in tooltip and confirmation.
+• Larger image previews preserve aspect ratio, with copied time, dimensions for new images, lazy visible rows and a bounded thumbnail cache.
+• Centered Back icon/label and compact wrapping About links.
+• Integrated Linux updater detects running package ownership or AppImage runtime and matches package, CPU and supported distribution release.
+• Signed Ed25519 release metadata, SHA-256 artifact checks, system authorization, atomic AppImage replacement with rollback, cancellation and safe restart coordination.
+• Automatic installation requires maintainer-provisioned signing keys and published signed metadata. Unsupported installations use manual downloads.
+Existing history, pins, preferences, shortcuts and data-directory arguments are preserved. No schema reset or data deletion is needed.
 
-Existing history, pins, preferences, MIME payloads, shortcut behavior and storage formats are preserved. Shared clear handling drops retained preview resources; repeated settings JSON serialization was removed. No dependencies were removed without evidence of being unused.
-
-The existing Debian and AppImage workflows are rebuilt for 2.1.0. Fedora RPM and offline Debian source/PPA workflows are prepared, with environment blockers recorded in [verification](V2.1.0-VERIFICATION.md). See [packaging](packaging/README.md) and [Launchpad setup](packaging/LAUNCHPAD-PPA.md). No release, PPA or website has been published by this task.
-
-Stop ClipVault and back up the whole storage directory before upgrading. Install the newer package using the same source and data path; normal removal never deletes personal history. Existing cleanup preferences still apply. [Migration](MIGRATION.md) and [compatibility](COMPATIBILITY.md) document the boundaries; external clipboard/paste/shortcut behavior still requires real desktop acceptance.
+See [update signing and publication](packaging/UPDATER.md) and [verification](V2.2.0-VERIFICATION.md). Artifacts are local candidates until independently tested, signed and published.

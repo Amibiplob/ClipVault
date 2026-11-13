@@ -33,7 +33,12 @@ impl Preferences {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Outcome {
     Current,
-    Available { version: String, url: String },
+    Available {
+        version: String,
+        url: String,
+        #[serde(default)]
+        notes: String,
+    },
     NoStable,
 }
 impl Outcome {
@@ -64,6 +69,8 @@ struct Release {
     html_url: String,
     draft: bool,
     prerelease: bool,
+    #[serde(default)]
+    body: String,
 }
 pub fn official_release(url: &str) -> bool {
     Url::parse(url).is_ok_and(|u| {
@@ -82,7 +89,12 @@ pub fn official_release(url: &str) -> bool {
     })
 }
 fn version(tag: &str) -> Result<Version, Failure> {
-    Version::parse(tag.strip_prefix('v').unwrap_or(tag)).map_err(|_| {
+    Version::parse(
+        tag.strip_prefix("v.")
+            .or_else(|| tag.strip_prefix('v'))
+            .unwrap_or(tag),
+    )
+    .map_err(|_| {
         Failure::unavailable("Release version comparison is unavailable (invalid version tag).")
     })
 }
@@ -107,6 +119,7 @@ fn compare(body: &[u8], installed: &str) -> Result<Outcome, Failure> {
         Ok(Outcome::Available {
             version: latest.to_string(),
             url: r.html_url,
+            notes: r.body,
         })
     } else {
         Ok(Outcome::Current)
@@ -240,6 +253,10 @@ impl Checker {
     }
 }
 
+pub fn parse_version(tag: &str) -> Result<Version, String> {
+    version(tag).map_err(|e| e.message)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,6 +271,7 @@ mod tests {
     fn semantic_versions_never_offer_downgrades() {
         for (installed, tag, newer) in [
             ("1.9.0", "v1.10.0", true),
+            ("1.1.0", "v.1.2.0", true),
             ("1.10.0", "1.9.0", false),
             ("1.1.0", "v1.1.0", false),
             ("1.1.0", "1.0.0", false),
