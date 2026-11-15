@@ -5,8 +5,10 @@ source /etc/os-release
 [[ $ID == fedora && -f /.dockerenv || $ID == fedora && -f /run/.containerenv ]] || {
     echo 'RPM installation test requires a disposable Fedora container.' >&2; exit 1;
 }
+version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml","rb"))["package"]["version"])')
+rpm_version=${version/-/\~}
 package=$(realpath "${1:?RPM path required}")
-test "$(rpm -qp --qf '%{NAME} %{VERSION}-%{RELEASE} %{ARCH}' "$package")" = 'clipvault 2.2.0-1 x86_64'
+test "$(rpm -qp --qf '%{NAME} %{VERSION}-%{RELEASE} %{ARCH}' "$package")" = "clipvault $rpm_version-1 x86_64"
 rpm -K "$package"
 rpm -qp --requires "$package"
 rpm -qpl "$package" | tee /tmp/clipvault-rpm-contents.txt
@@ -16,7 +18,7 @@ rpm -qp --scripts "$package"
 rpm -Uvh "$package"
 # Exercise the actual SQLite/GIF/WebP loaders, not just installed package names.
 python3 "$(dirname -- "${BASH_SOURCE[0]}")/check-packaged-runtime.py"
-test "$(clipvault --version)" = 'ClipVault 2.2.0'
+test "$(clipvault --version)" = "ClipVault $version"
 clipvault --help
 clipvault --diagnostics
 test -s /usr/share/doc/clipvault/THIRD-PARTY-NOTICES.txt

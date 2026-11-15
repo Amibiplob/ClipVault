@@ -18,6 +18,11 @@ depends = "$auto, libc6 (>= 2.39), libsqlite3-0, libgdk-pixbuf-2.0-0, libx11-6, 
 recommends = "webp-pixbuf-loader, fontconfig, xdg-utils"
 maintainer-scripts = "packaging/linux"
 assets = [
+    ["packaging/RELEASING.md", "usr/share/doc/clipvault/packaging/RELEASING.md", "644"],
+    ["packaging/UPDATER.md", "usr/share/doc/clipvault/packaging/UPDATER.md", "644"],
+    ["packaging/README.md", "usr/share/doc/clipvault/packaging/README.md", "644"],
+    ["docs/WEBSITE.md", "usr/share/doc/clipvault/docs/WEBSITE.md", "644"],
+    ["docs/SCREENSHOT.md", "usr/share/doc/clipvault/docs/SCREENSHOT.md", "644"],
     ["CHANGELOG-v2.2.0.txt", "usr/share/doc/clipvault/CHANGELOG-v2.2.0.txt", "644"],
     ["V2.2.0-VERIFICATION.md", "usr/share/doc/clipvault/V2.2.0-VERIFICATION.md", "644"],
     ["packaging/UPDATER.md", "usr/share/doc/clipvault/UPDATER.md", "644"],

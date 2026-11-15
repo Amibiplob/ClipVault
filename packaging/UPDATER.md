@@ -50,15 +50,39 @@ python3 scripts/update-metadata.py --tag v2.2.0 --signing-key "$HOME/.local/shar
 This command refuses a key inside the repository, a non-Ed25519 key or a key whose public
 half is not embedded in the source trust store. Its metadata is generated from actual
 current-version artifacts, with DEB/RPM identity inspection, bytes, file size and SHA-256.
-Each packaging script regenerates unsigned metadata and **deletes any obsolete signature**;
-sign only once all final artifacts have been gathered. Older dist artifacts are untouched.
+Each packaging script regenerates unsigned metadata for its own package formats and **deletes any obsolete signature**;
+sign only once all final artifacts have been gathered, using `--require-all` for releases. Older dist artifacts are untouched.
 
-Upload (as a separate maintainer action) the exact artifacts, `clipvault-update.json`,
-`clipvault-update.json.sig` (raw 64-byte detached signature) and `v2.2.0-SHA256SUMS` to
-`https://github.com/Amibiplob/ClipVault/releases/tag/v2.2.0`. These files belong in the same
-release. JSON bytes must not be reformatted after signing. The updater accepts v2.1.0 and
-legacy v.1.2.0 tag syntax, compares SemVer precedence and excludes prereleases/drafts.
-The packages workflow gathers the actual DEB/AppImage/RPM candidates and prepares a signed metadata artifact using the external GitHub Actions secret `CLIPVAULT_UPDATE_SIGNING_KEY`. Configure that secret only after the public key is embedded and reviewed. It never publishes a release automatically. Release signing/publication and private-key provisioning were not performed here.
+The automated [release workflow](RELEASING.md) gathers all three final packages,
+then uploads the exact packages, `clipvault-update.json`, `clipvault-update.json.sig`
+(raw 64-byte detached signature) and `TAG-SHA256SUMS` into the same release. The checksum
+filename is derived from the actual tag, for example `v2.2.1-SHA256SUMS`.
+JSON bytes must not be reformatted after signing. `release_notes` comes from the matching
+section in `CHANGELOG.md`. Stable app updates accept v2.1.0 and legacy v.1.2.0 tag syntax,
+compare SemVer precedence, and exclude prereleases/drafts. Prerelease packaging is allowed,
+but those releases are never selected by the stable updater.
+
+The exact Actions secret is **CLIPVAULT_UPDATE_SIGNING_KEY**, whose value is the full
+unencrypted Ed25519 private PEM with real newlines. See [creation/upload commands and
+one-time repository settings](RELEASING.md#one-time-setup). It is distinct from optional
+APT OpenPGP keys. Missing secrets or an empty/mismatched public trust store stop signing
+and publication. No production signing or publication was performed here.
+
+Verify a downloaded manifest and raw signature with the exact public key embedded in your
+trusted source/app (the script performs no regeneration):
+
+```sh
+python3 scripts/update-metadata.py --dist /path/to/downloaded-release --verify-only
+```
+
+For an independent OpenSSL check, convert the trusted raw public hex to DER (the prefix
+is Ed25519 SPKI), then verify exact bytes. Replace PUBLIC_HEX with the already trusted
+public key, never one obtained solely from the untrusted download:
+
+```sh
+python3 -c 'import pathlib; pathlib.Path("public.der").write_bytes(bytes.fromhex("302a300506032b6570032100" + "PUBLIC_HEX"))'
+openssl pkeyutl -verify -pubin -keyform DER -inkey public.der -rawin -in clipvault-update.json -sigfile clipvault-update.json.sig
+```
 
 A **SHA-256 checksum** detects changed artifact bytes; it does not establish authenticity.
 The **Ed25519 signature** authenticates exact manifest bytes with an embedded trusted key;

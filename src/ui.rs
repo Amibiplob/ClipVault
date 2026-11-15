@@ -3657,7 +3657,10 @@ mod tests {
         frame(&mut app, &ctx);
         assert!(app.changelog_open);
         let output = frame(&mut app, &ctx);
-        text_position(&output, "What’s New in ClipVault v2.2.0");
+        text_position(
+            &output,
+            &format!("What’s New in ClipVault v{}", env!("CARGO_PKG_VERSION")),
+        );
         let output = frame(&mut app, &ctx);
         click_at(&ctx, text_position(&output, "Done"), |ctx| app.render(ctx));
         assert!(!app.changelog_open);

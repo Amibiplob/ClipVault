@@ -41,6 +41,7 @@ case $mode in
             -f packaging/fedora/Containerfile -t clipvault-fedora-builder packaging/fedora
         python3 scripts/prepare-source.py "${@:2}"
         "$engine" run --rm --network=none --platform linux/amd64 \
+            -e "SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1794484800}" \
             -v "$PWD:/build:Z" clipvault-fedora-builder bash scripts/package-rpm.sh native
         ;;
     native)
@@ -53,8 +54,8 @@ case $mode in
         mkdir -p "$top"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS} dist
         cp -- "$archive" "$top/SOURCES/"
         rpmbuild -ba packaging/linux/clipvault.spec --define "_topdir $top" \
-            --define "clipvault_version $version" --define '_build_id_links none'
-        package="$top/RPMS/x86_64/clipvault-$version-1.x86_64.rpm"
+            --define "clipvault_version ${version/-/~}" --define "clipvault_source_version $version" --define '_build_id_links none'
+        package="$top/RPMS/x86_64/clipvault-${version/-/~}-1.x86_64.rpm"
         test -s "$package"
         rpm -K "$package"
         if [[ -f /.dockerenv || -f /run/.containerenv ]]; then
@@ -62,9 +63,9 @@ case $mode in
         else
             echo 'RPM built; installation/launch tests require a disposable Fedora container.'
         fi
-        cp -- "$package" dist/
-        (cd dist && sha256sum "$(basename "$package")" > RPM-SHA256SUMS)
-        python3 scripts/update-metadata.py
+        cp -- "$package" "dist/clipvault-$version-1.x86_64.rpm"
+        (cd dist && sha256sum "clipvault-$version-1.x86_64.rpm" > RPM-SHA256SUMS)
+        python3 scripts/update-metadata.py --packages rpm
         ;;
 esac
 echo "RPM output: $PWD/dist/clipvault-$version-1.x86_64.rpm"

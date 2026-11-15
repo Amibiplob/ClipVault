@@ -32,3 +32,6 @@ private-keys-v1.d/
 *.gpg
 *.kbx
 *.asc
+
+# Website dependencies and browser evidence are local build outputs.
+/node_modules/

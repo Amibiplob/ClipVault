@@ -1,0 +1,15 @@
+{
+  "name": "clipvault-website",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Static ClipVault documentation website; app version is in Cargo.toml",
+  "scripts": {
+    "build": "node scripts/build-website.cjs && tailwindcss -c tailwind.config.cjs -i docs/input.css -o target/site/style.css --minify",
+    "test": "node scripts/check-website.cjs",
+    "test:browser": "node scripts/test-website-browser.cjs"
+  },
+  "devDependencies": {
+    "tailwindcss": "3.4.19",
+    "playwright": "1.58.2"
+  }
+}

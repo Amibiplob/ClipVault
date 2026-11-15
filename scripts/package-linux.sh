@@ -26,7 +26,7 @@ version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"
 mkdir -p dist
 if [[ $mode == all || $mode == deb ]]; then
     deb="$PWD/dist/clipvault_${version}-1_amd64.deb"
-    cargo deb --no-build --offline --locked --output "$deb"
+    cargo deb --no-build --offline --locked --deb-version "${version/-/~}-1" --output "$deb"
     printf 'Created %s\n' "$deb"
 fi
 if [[ $mode == all || $mode == appimage || $mode == stage ]]; then
@@ -75,4 +75,8 @@ if [[ $mode != stage ]]; then
     (cd dist && find . -maxdepth 1 -type f \( -name '*.deb' -o -name '*.AppImage' \) -print0 | sort -z | xargs -0 -r sha256sum > SHA256SUMS)
 fi
 
-if [[ $mode != stage ]]; then python3 scripts/update-metadata.py; fi
+case "$mode" in
+    all) python3 scripts/update-metadata.py --packages deb appimage ;;
+    deb) python3 scripts/update-metadata.py --packages deb ;;
+    appimage) python3 scripts/update-metadata.py --packages appimage ;;
+esac

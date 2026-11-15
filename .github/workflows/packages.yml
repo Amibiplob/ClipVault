@@ -1,77 +1,222 @@
-name: Linux package candidates
-on: [workflow_dispatch]
+name: Release packages
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to rebuild (for example v2.2.1)
+        required: true
+        type: string
+      publish:
+        description: Publish after all packages and signatures pass (false is a nonpublishing rehearsal)
+        default: false
+        type: boolean
 permissions:
   contents: read
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 jobs:
-  build:
+  preflight:
     runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      commit: ${{ steps.resolve.outputs.commit }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install dependencies
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve an existing tag and verify exact source versions
+        id: resolve
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+          commit=$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")
+          git checkout --detach "$commit"
+          python3 scripts/release-support.py --tag "$RELEASE_TAG" --commit "$commit"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+  deb-appimage:
+    needs: preflight
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.89.0
+        with:
+          components: rustfmt, clippy
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/packaging-tools
+          key: noble-x86_64-rust1.89-tools-${{ hashFiles('Cargo.lock', 'packaging/tools.lock.json', 'scripts/install-packaging-tools.sh') }}
+      - name: Install Noble runtime and validation dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libsqlite3-0 libgdk-pixbuf-2.0-0 libgdk-pixbuf2.0-bin webp-pixbuf-loader libxkbcommon-x11-0 desktop-file-utils appstream libgl1 libegl1 patchelf
-      - run: cargo fetch --locked
-      - run: cargo test --locked
-      - run: bash scripts/install-packaging-tools.sh
-      - run: python3 scripts/packaging-support.py notices
-      - run: bash scripts/package-linux.sh all
-      - run: bash scripts/test-linux-packages.sh
+          sudo apt-get install -y build-essential pkg-config libsqlite3-0 libgdk-pixbuf-2.0-0 libgdk-pixbuf2.0-bin webp-pixbuf-loader libxkbcommon-x11-0 desktop-file-utils appstream libgl1 libegl1 patchelf ripgrep xvfb
+      - name: Test, build and validate DEB and AppImage
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/release-logs
+          exec > >(tee target/release-logs/noble.log) 2>&1
+          export SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
+          cargo fetch --locked
+          cargo fmt -- --check
+          cargo test --locked --offline
+          cargo clippy --locked --offline --all-targets -- -D warnings
+          python3 scripts/test-update-metadata.py
+          python3 scripts/test-release.py
+          bash scripts/install-packaging-tools.sh
+          python3 scripts/packaging-support.py notices
+          python3 scripts/extract-cached-runtime.py
+          LDAI_RUNTIME_FILE="$PWD/target/packaging-tools/runtime-x86_64" bash scripts/package-linux.sh all
+          LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a bash scripts/test-linux-packages.sh --gui
       - uses: actions/upload-artifact@v4
         with:
-          name: clipvault-linux-candidates
-          path: dist/
+          name: release-noble
+          overwrite: true
+          path: |
+            dist/*.deb
+            dist/*.AppImage
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diagnostics-noble-${{ github.run_attempt }}
+          path: target/release-logs/
   fedora-rpm:
+    needs: preflight
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: bash scripts/package-rpm.sh container --online
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.89.0
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: fedora44-vendor-rust1.89-${{ hashFiles('Cargo.lock', 'packaging/fedora/Containerfile') }}
+      - name: Build and test in disposable Fedora 44
+        env:
+          CONTAINER_ENGINE: docker
+        run: |
+          export SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
+          bash scripts/package-rpm.sh container --online
       - uses: actions/upload-artifact@v4
         with:
-          name: clipvault-fedora-rpm-candidate
+          name: release-fedora
+          overwrite: true
           path: dist/*.rpm
           if-no-files-found: error
-  ppa-source:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: sudo apt-get update && sudo apt-get install -y dpkg-dev devscripts debhelper lintian
-      - run: bash scripts/prepare-ppa-source.sh --online
-      - run: lintian target/ppa-source/*_source.changes
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: clipvault-unsigned-source-candidate
-          path: target/ppa-source/clipvault_*.*
-  # No release upload: candidates need distribution installation and paste acceptance.
-  signed-update-metadata:
-    needs: [build, fedora-rpm]
+          name: diagnostics-fedora-${{ github.run_attempt }}
+          path: dist/*.log
+  sign:
+    needs: [preflight, deb-appimage, fedora-rpm]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+          persist-credentials: false
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
-          pattern: clipvault-*-candidate*
+          pattern: release-*
           merge-multiple: true
           path: dist
       - run: sudo apt-get update && sudo apt-get install -y rpm openssl
-      - name: Generate and sign final gathered artifact metadata
+      - name: Require all packages and sign with the app's trusted key
         env:
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.preflight.outputs.commit }}
           RELEASE_SIGNING_KEY: ${{ secrets.CLIPVAULT_UPDATE_SIGNING_KEY }}
         run: |
-          test -n "$RELEASE_SIGNING_KEY" || { echo 'Maintainer Ed25519 signing setup is required; no signed metadata was produced.' >&2; exit 1; }
-          key_file="$RUNNER_TEMP/clipvault-ed25519.pem"
+          set -euo pipefail
+          mkdir -p target/release-logs
+          exec > >(tee target/release-logs/signing.log) 2>&1
+          test -n "$RELEASE_SIGNING_KEY" || { echo '::error::Missing CLIPVAULT_UPDATE_SIGNING_KEY. Provision Ed25519 private PEM in Actions secrets and embed its public key in packaging/update-keys.json before tagging.'; exit 1; }
+          key_file="$RUNNER_TEMP/clipvault-release.pem"
           umask 077
           trap 'rm -f -- "$key_file"' EXIT
           printf '%s\n' "$RELEASE_SIGNING_KEY" > "$key_file"
-          python3 scripts/update-metadata.py --signing-key "$key_file"
+          python3 scripts/release-support.py --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --dist dist
+          python3 scripts/update-metadata.py --dist dist --tag "$RELEASE_TAG" --require-all --signing-key "$key_file"
+          python3 scripts/publish-release.py --dist dist --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --dry-run
       - uses: actions/upload-artifact@v4
         with:
-          name: clipvault-signed-update-metadata
-          path: |
-            dist/clipvault-update.json
-            dist/clipvault-update.json.sig
-            dist/v2.2.0-SHA256SUMS
+          name: signed-release-bundle
+          overwrite: true
+          path: dist/
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diagnostics-signing-${{ github.run_attempt }}
+          path: target/release-logs/
+  publish:
+    if: github.event_name == 'push' || inputs.publish == true
+    needs: [preflight, deb-appimage, fedora-rpm, sign]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: signed-release-bundle
+          path: dist
+      - name: Publish only the complete verified bundle; never replace published bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.preflight.outputs.commit }}
+        run: |
+          set -euo pipefail
+          mkdir -p target/release-logs
+          python3 scripts/publish-release.py --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --dist dist 2>&1 | tee target/release-logs/publish.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diagnostics-publishing-${{ github.run_attempt }}
+          path: target/release-logs/
+  result:
+    if: always()
+    needs: [preflight, deb-appimage, fedora-rpm, sign, publish]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Report final result
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          results = json.loads(os.environ['RESULTS'])
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write('## Release result\n')
+              for job, value in results.items():
+                  out.write(f"- {job}: {value['result']}\n")
+              out.write('\nAll builds and signing must pass before publication. Failed uploads leave a draft unpublished. Diagnostics are in workflow artifacts. Manual publish=false never creates or edits a release.\n')
+          if any(v['result'] in ('failure', 'cancelled') for v in results.values()):
+              raise SystemExit('Required release step failed; no incomplete release was published.')
+          PY

@@ -1,0 +1,11 @@
+{
+  "cargo-deb": "3.8.0",
+  "linuxdeploy": {
+    "url": "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage",
+    "sha256": "df908b19f1ed1cdafa79508d415aa12d6c56ce4d56d4149aa8c09286718706e5"
+  },
+  "linuxdeploy-plugin-appimage": {
+    "url": "https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage",
+    "sha256": "49d6a17160675a6bd1781699aae6bdf7692d98552e02a3671d2183d10547842e"
+  }
+}

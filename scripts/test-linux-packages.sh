@@ -77,7 +77,7 @@ if $stage; then
     exit 0
 fi
 test "$(dpkg-deb -f "$deb" Package)" = clipvault
-test "$(dpkg-deb -f "$deb" Version)" = "$version-1"
+test "$(dpkg-deb -f "$deb" Version)" = "${version/-/~}-1"
 test "$(dpkg-deb -f "$deb" Architecture)" = amd64
 dependencies=$(dpkg-deb -f "$deb" Depends)
 for package in libsqlite3-0 libgdk-pixbuf-2.0-0 libx11-6 libxkbcommon0 libwayland-client0 libgl1 libegl1; do

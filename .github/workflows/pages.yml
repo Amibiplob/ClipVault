@@ -2,26 +2,55 @@ name: Website
 on:
   push:
     branches: [main]
-    paths: ['docs/**', '.github/workflows/pages.yml']
+    paths: ['docs/**', 'scripts/*website*', 'package.json', 'package-lock.json', 'tailwind.config.cjs', '.github/workflows/pages.yml']
   workflow_dispatch:
+  # GITHUB_TOKEN publication does not trigger another release workflow.
+  # workflow_run refreshes Pages after the package workflow finishes successfully.
+  workflow_run:
+    workflows: ['Release packages']
+    types: [completed]
 permissions:
   contents: read
-  pages: write
-  id-token: write
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
+  build:
+    permissions:
+      contents: read
+      pages: read
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
     steps:
+      # Always build the default branch, never code/artifacts from a workflow_run payload.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run build && npm test && npm run test:browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: website-browser-evidence-${{ github.run_attempt }}
+          path: target/website-checks/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: docs
+          path: target/site
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - uses: actions/deploy-pages@v4
         id: deployment

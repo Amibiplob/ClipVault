@@ -7,7 +7,8 @@ License:        MIT
 Distribution:   Fedora 44
 URL:            https://github.com/Amibiplob/ClipVault
 BuildArch:      x86_64
-Source0:        clipvault-%{version}.tar.xz
+%{!?clipvault_source_version:%global clipvault_source_version %{version}}
+Source0:        clipvault-%{clipvault_source_version}.tar.xz
 BuildRequires:  rust >= 1.88, cargo >= 1.88, gcc, gcc-c++, python3, pkgconf-pkg-config
 BuildRequires:  wayland-devel, libxkbcommon-devel, mesa-libGL-devel, mesa-libEGL-devel
 BuildRequires:  sqlite-libs, gdk-pixbuf2, desktop-file-utils
@@ -23,14 +24,14 @@ AutoReqProv:    yes
 Local clipboard history with text, supported rich formats, images and file
 references. No cloud sync. Desktop capabilities and testing vary by session.
 %prep
-%setup -q
+%setup -q -n clipvault-%{clipvault_source_version}
 %build
 export CARGO_HOME="$PWD/.build-cargo-home"
 cargo build --release --locked --offline
 %check
 export CARGO_HOME="$PWD/.build-cargo-home"
 cargo test --locked --offline
-test "$(target/release/clipvault --version)" = "ClipVault %{version}"
+test "$(target/release/clipvault --version)" = "ClipVault %{clipvault_source_version}"
 desktop-file-validate packaging/linux/io.clipvault.desktop.desktop
 %install
 mkdir -p %{buildroot}

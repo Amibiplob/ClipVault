@@ -147,6 +147,8 @@ def stage():
     copy(ROOT / "packaging/APT-REPOSITORY.md", "usr/share/doc/clipvault/APT-REPOSITORY.md")
     copy(ROOT / "packaging/README.md", "usr/share/doc/clipvault/PACKAGING.md")
     copy(ROOT / "packaging/SOFTWARE-MANAGER-VERIFICATION.md", "usr/share/doc/clipvault/SOFTWARE-MANAGER-VERIFICATION.md")
+    for name in ["packaging/RELEASING.md", "packaging/UPDATER.md", "packaging/README.md", "docs/WEBSITE.md", "docs/SCREENSHOT.md"]:
+        copy(ROOT / name, "usr/share/doc/clipvault/" + name)
     copy(ROOT / "docs/history.png", "usr/share/doc/clipvault/docs/history.png")
     copy(ROOT / "assets/clipvault.svg", "usr/share/doc/clipvault/assets/clipvault.svg")
     paths = library_paths()

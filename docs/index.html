@@ -1,449 +1,80 @@
 <!doctype html>
 <html lang="en" data-theme="system">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ClipVault — Your clipboard. With a memory.</title>
-    <meta
-      name="description"
-      content="Find the text, images and links you copied earlier. ClipVault is a free, open-source clipboard manager for Linux, with local history and practical privacy controls."
-    />
-    <link rel="icon" href="assets/clipvault.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="style.css" />
-    <script src="site.js" defer></script>
-  </head>
-  <body>
-    <a class="skip" href="#main">Skip to content</a>
-    <div class="wrap">
-      <header>
-        <a class="brand" href="#" aria-label="ClipVault home"
-          ><img src="assets/clipvault.svg" width="34" height="38" alt="" />ClipVault</a
-        >
-        <nav aria-label="Main">
-          <a href="#how">How it works</a><a href="#features">Features</a><a href="#faq">FAQ</a
-          ><a href="https://github.com/Amibiplob/ClipVault">GitHub ↗</a>
-        </nav>
-        <a class="button" href="#downloads">↓ Download</a>
-      </header>
-      <main id="main">
-        <section class="hero">
-          <div>
-            <span class="eyebrow">A little history. A smoother workflow.</span>
-            <h1>Your clipboard.<br />With a memory.</h1>
-            <p class="lead">
-              Find the text, images, and links you copied earlier. Keep them on your Linux computer,
-              ready to use again.
-            </p>
-            <div class="actions">
-              <a class="button" href="#downloads">↓ Get ClipVault for Linux</a
-              ><a class="button secondary" href="https://github.com/Amibiplob/ClipVault"
-                >View source ↗</a
-              >
-            </div>
-            <p class="meta">Free & open source · <span data-version>2.2.0</span> source upgrade</p>
-            <a class="text-link" href="#downloads">Which download should I choose?</a>
-          </div>
-          <figure class="hero-image">
-            <img
-              src="history.png"
-              width="440"
-              height="540"
-              alt="Actual ClipVault desktop window with searchable clipboard history"
-              loading="eager"
-            />
-            <figcaption>
-              Actual app capture · <kbd>Super</kbd> + <kbd>V</kbd> opens your history.<br /><span
-                id="capture-caption"
-                >v2.0.0 native capture · Existing local history; capture mode does not monitor the
-                clipboard.</span
-              >
-            </figcaption>
-          </figure>
-        </section>
-        <section id="how">
-          <div class="section-heading">
-            <span class="eyebrow">Right where you left it</span>
-            <h2>Copy. Find. Paste.</h2>
-          </div>
-          <div class="grid three steps">
-            <article>
-              <span class="step">01 <kbd>Ctrl</kbd> + <kbd>C</kbd></span>
-              <h3>Copy normally</h3>
-              <p>
-                Copy text, a link, an image, or file references. ClipVault saves supported formats
-                while monitoring is on.
-              </p>
-            </article>
-            <article>
-              <span class="step">02 <kbd>Super</kbd> + <kbd>V</kbd></span>
-              <h3>Find an earlier clip</h3>
-              <p>
-                Search your history, then click a clip. Or use ↑ / ↓ to select and Enter to activate
-                it.
-              </p>
-            </article>
-            <article>
-              <span class="step">03 Ready to reuse</span>
-              <h3>Get back to your work</h3>
-              <p>
-                ClipVault hides and attempts paste on X11. If automatic paste is unavailable, the
-                item stays copied—press <kbd>Ctrl</kbd> + <kbd>V</kbd>.
-              </p>
-            </article>
-          </div>
-        </section>
-        <section id="features" class="feature-section">
-          <div>
-            <span class="eyebrow">Made for everyday things</span>
-            <h2>Keep the useful<br />things close.</h2>
-            <p class="lead">
-              The note you need again. The link you lost. The image you copied a moment ago.
-            </p>
-            <div class="format-tags">
-              <span>Text & code</span><span>Images</span><span>Links</span><span>Rich content</span
-              ><span>File references</span>
-            </div>
-            <p class="meta">
-              Available formats depend on the source application. File references are not backups of
-              your files.
-            </p>
-          </div>
-          <div class="feature-list">
-            <article>
-              <span class="feature-icon" aria-hidden="true">▤</span>
-              <div>
-                <h3>History that stays</h3>
-                <p>
-                  Saved clips survive app restarts. Reboot cleanup is optional and off by default.
-                </p>
-              </div>
-            </article>
-            <article>
-              <span class="feature-icon" aria-hidden="true">◆</span>
-              <div>
-                <h3>Pin what matters</h3>
-                <p>Pinned clips stay safe from automatic age and item-count cleanup.</p>
-              </div>
-            </article>
-            <article>
-              <span class="feature-icon" aria-hidden="true">⌕</span>
-              <div>
-                <h3>Find it faster</h3>
-                <p>
-                  Search saved content and filter by type. Choose a compact list or a comfortable
-                  split preview.
-                </p>
-              </div>
-            </article>
-            <article>
-              <span class="feature-icon" aria-hidden="true">✎</span>
-              <div>
-                <h3>A fresh copy, every edit</h3>
-                <p>
-                  Save edited text as a new clip. Your original stays exactly where you left it.
-                </p>
-              </div>
-            </article>
-          </div>
-        </section>
-        <aside class="privacy-strip">
-          <span aria-hidden="true">▣</span><strong>Stored on your computer</strong>
-          <p>
-            No account or cloud sync. History is not encrypted. Pause monitoring before copying
-            sensitive information. Optional update checks contact GitHub.
-          </p>
-        </aside>
-        <section class="download-section" id="downloads">
-          <div class="section-heading">
-            <span class="eyebrow">Choose what fits your system</span>
-            <h2>A home on your Linux desktop.</h2>
-            <p id="release-status" role="status">
-              Check GitHub Releases for published packages. This website does not assume v2.2.0 has
-              been published.
-            </p>
-          </div>
-          <div class="grid three">
-            <article class="download-card">
-              <span class="package-icon" aria-hidden="true">▱</span>
-              <h3>.deb package</h3>
-              <span class="tag">Mint / Ubuntu family</span>
-              <p>
-                For compatible Debian-based systems. The current build baseline is glibc 2.39 (Mint
-                22 / Ubuntu 24.04).
-              </p>
-              <a
-                class="button package"
-                data-format="deb"
-                href="https://github.com/Amibiplob/ClipVault/releases"
-                >Check .deb releases ↗</a
-              >
-              <details>
-                <summary>How to install</summary>
-                <p>Download a published .deb and open it with your package installer, or run:</p>
-                <code>sudo apt install ./clipvault_VERSION-1_amd64.deb</code>
-                <p>Replace VERSION with the downloaded filename.</p>
-              </details>
-            </article>
-            <article class="download-card">
-              <span class="package-icon" aria-hidden="true">◇</span>
-              <h3>AppImage</h3>
-              <span class="tag">Portable · x86-64</span>
-              <p>
-                Keep a portable copy in a stable folder. Host graphics drivers and a compatible
-                Linux runtime are still required.
-              </p>
-              <a
-                class="button package"
-                data-format="AppImage"
-                href="https://github.com/Amibiplob/ClipVault/releases"
-                >Check AppImage releases ↗</a
-              >
-              <details>
-                <summary>How to run</summary>
-                <p>Open file Properties → Permissions, enable executable, then open it. Or use:</p>
-                <code>chmod +x ClipVault-*.AppImage<br />./ClipVault-VERSION-x86_64.AppImage</code>
-                <p>
-                  If FUSE is unavailable, try <code>--appimage-extract-and-run</code>. Menu
-                  installation is a separate optional step.
-                </p>
-              </details>
-            </article>
-            <article class="download-card">
-              <span class="package-icon" aria-hidden="true">⬡</span>
-              <h3>.rpm package</h3>
-              <span class="tag">Fedora 44 only</span>
-              <p>
-                Fedora RPM source packaging is prepared. A v2.2.0 RPM is not available from this
-                build; installation and desktop behavior still require Fedora testing.
-              </p>
-              <a
-                class="button package"
-                data-format="rpm"
-                href="https://github.com/Amibiplob/ClipVault/releases"
-                >Check .rpm releases ↗</a
-              >
-              <details>
-                <summary>How to install</summary>
-                <p>Use an RPM only when it is listed in the release and supports your system:</p>
-                <code>sudo dnf install ./clipvault-VERSION-1.x86_64.rpm</code>
-              </details>
-            </article>
-          </div>
-          <p class="center meta">
-            Download buttons link directly to packages only after GitHub confirms a published asset.
-            <a href="https://github.com/Amibiplob/ClipVault/releases">All releases ↗</a>
-          </p>
-        </section>
-        <section id="compatibility">
-          <span class="eyebrow">Linux support, explained</span>
-          <h2>Your desktop makes a difference.</h2>
-          <p>
-            Building a package does not prove desktop integration. These are the limits of this
-            release’s testing; “all Linux distributions” remains a goal.
-          </p>
-          <div class="table-scroll">
-            <table>
-              <caption>
-                v2.2.0 compatibility — see the repository for the full test record
-              </caption>
-              <thead>
-                <tr>
-                  <th>System / desktop</th>
-                  <th>Session</th>
-                  <th>Capture</th>
-                  <th>Shortcut</th>
-                  <th>Automatic paste</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Mint 22.3 / Cinnamon</td>
-                  <td>X11</td>
-                  <td>Backend implemented</td>
-                  <td>Desktop-managed</td>
-                  <td>XTEST attempt</td>
-                  <td><span class="tag">Limited</span></td>
-                </tr>
-                <tr>
-                  <td>Ubuntu 24.04 / GNOME</td>
-                  <td>X11</td>
-                  <td>Implemented</td>
-                  <td>Desktop-managed</td>
-                  <td>XTEST attempt</td>
-                  <td>Untested</td>
-                </tr>
-                <tr>
-                  <td>GNOME</td>
-                  <td>Wayland</td>
-                  <td>Requires data-control support</td>
-                  <td>Desktop-managed</td>
-                  <td>Manual Ctrl+V</td>
-                  <td>Untested</td>
-                </tr>
-                <tr>
-                  <td>Plasma / MATE / Xfce</td>
-                  <td>X11 / Wayland</td>
-                  <td>Session-dependent</td>
-                  <td>Manual / managed where supported</td>
-                  <td>X11 attempt / manual</td>
-                  <td>Untested</td>
-                </tr>
-                <tr>
-                  <td>Other distributions</td>
-                  <td>Varies</td>
-                  <td>Capability-dependent</td>
-                  <td>Manual setup</td>
-                  <td>Capability-dependent</td>
-                  <td>Untested</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <p class="meta">
-            Mint host: automated storage, UI and package-archive checks; external-app paste and
-            installed-package behavior are not verified here.
-            <a href="https://github.com/Amibiplob/ClipVault/blob/main/COMPATIBILITY.md"
-              >Full compatibility table ↗</a
-            >
-          </p>
-        </section>
-        <section id="faq">
-          <span class="eyebrow">A few useful answers</span>
-          <h2>Good to know before you copy.</h2>
-          <div class="faqs">
-            <details open>
-              <summary>Does my history stay after restarting?</summary>
-              <p>
-                Yes. History, pins, and preferences are stored locally. Optional cleanup can remove
-                unpinned clips. “Clear unpinned history on reboot” is off by default and uses the
-                Linux boot ID, so restarting only ClipVault does not trigger it.
-              </p>
-            </details>
-            <details>
-              <summary>How do I use Super+V?</summary>
-              <p>
-                Super is usually the Windows key. ClipVault attempts to create its own desktop
-                shortcut on Cinnamon, GNOME, MATE and Xfce. If another action already owns the
-                combination, choose another shortcut or review Keyboard settings. ClipVault never
-                removes another app’s binding. Shortcuts shows the command for your installed
-                executable and data directory.
-              </p>
-              <p>
-                For manual setup, add the exact command shown in ClipVault → Shortcuts to your
-                desktop’s custom shortcuts. With a normal system installation, the command is
-                <code>clipvault --toggle</code>.
-              </p>
-            </details>
-            <details>
-              <summary>Does selecting a clip paste it automatically?</summary>
-              <p>
-                On X11, ClipVault restores the clipboard, hides, restores the previous application’s
-                focus, waits for modifiers to release, and requests paste. It cannot prove the
-                receiving app accepted that request. Wayland and failed focus checks use the
-                fallback: “Copied—press Ctrl+V to paste.” An explicit Copy action is also available.
-              </p>
-            </details>
-            <details>
-              <summary>Is sensitive content always detected?</summary>
-              <p>
-                No. Phrase exclusions and supported password-manager hints help, but they do not
-                guarantee detection. Application exclusions are approximate on X11 and unavailable
-                on Wayland. Images are not scanned for secret text. Pause monitoring before copying
-                sensitive information.
-              </p>
-            </details>
-            <details>
-              <summary>Where are my clips stored?</summary>
-              <p>
-                Normally <code>~/.local/share/clipvault/</code>, or the ClipVault folder under
-                <code>$XDG_DATA_HOME</code>. See Privacy for your exact location and an Open storage
-                folder button. Files use private account permissions; history is not encrypted.
-              </p>
-            </details>
-            <details>
-              <summary>How do I update ClipVault?</summary>
-              <p>
-                In About → App updates, check for a release and click Update. ClipVault matches the
-                running executable’s package ownership (.deb or .rpm) or AppImage runtime and CPU.
-                RPM updates also require the exact supported distribution and release. Signed release
-                metadata and the downloaded artifact are verified before installation. DEB/RPM updates
-                use the system administrator authentication dialog; repository-managed installations
-                use the system Update Manager. AppImages are replaced atomically with a rollback copy.
-                Unknown installations, missing matching packages, signing setup or read-only locations
-                offer official manual downloads. Signing is not configured in this source candidate.
-                Restart waits for open edits and flushes saved history; clipboard data stays in place.
-
-              </p>
-            </details>
-            <details>
-              <summary>Where can I report a problem?</summary>
-              <p>
-                <a href="https://github.com/Amibiplob/ClipVault/issues">Open a GitHub issue</a> with
-                your distribution, desktop, X11 or Wayland session, package version, and
-                reproduction steps. Remove private clipboard content from logs and screenshots.
-              </p>
-            </details>
-          </div>
-        </section>
-        <section id="release-notes" class="release-notes">
-          <div>
-            <span class="eyebrow">What’s new in <span data-version>2.2.0</span></span>
-            <h2>Small details.<br />A smoother everyday.</h2>
-          </div>
-          <ul>
-            <li>Larger image previews, aligned Back navigation and wrapping About links.</li>
-            <li>Installation-aware signed updater with progress, verification and safe restart.</li>
-            <li>Clear unpinned keeps pins and explains its scope across all history.</li>
-            <li>Existing saved clips, preferences and shortcut behavior preserved.</li>
-            <li>
-              Fedora RPM and offline Launchpad source workflows prepared; publication pending.
-            </li>
-          </ul>
-          <p>
-            <a href="https://github.com/Amibiplob/ClipVault/blob/main/CHANGELOG.md"
-              >Read changelog ↗</a
-            >
-            ·
-            <a href="https://github.com/Amibiplob/ClipVault/blob/main/V2.2.0-VERIFICATION.md"
-              >Testing and known limitations ↗</a
-            >
-          </p>
-        </section>
-        <section class="cta">
-          <h2>Your next useful copy is worth keeping.</h2>
-          <p>Free, open source, and right on your computer.</p>
-          <div class="actions">
-            <a class="button" href="#downloads">↓ Get ClipVault</a
-            ><a class="button secondary" href="https://github.com/Amibiplob/ClipVault"
-              >View source ↗</a
-            >
-          </div>
-        </section>
-      </main>
-      <footer>
-        <a class="brand" href="#"
-          ><img src="assets/clipvault.svg" width="25" height="30" alt="" />ClipVault</a
-        >
-        <p>
-          Built by <a href="https://amibiplob.vercel.app"><strong>Md Biplob Hosain</strong></a>
-        </p>
-        <div class="footer-links">
-          <a href="https://github.com/Amibiplob">GitHub</a
-          ><a href="https://amibiplob.vercel.app">Portfolio</a
-          ><a href="https://linkedin.com/in/amibiplob">LinkedIn</a
-          ><a href="https://github.com/Amibiplob/ClipVault/issues">Report an issue</a
-          ><a href="https://github.com/Amibiplob/ClipVault/blob/main/LICENSE">MIT License</a>
-        </div>
-        <label class="theme-choice"
-          >Theme
-          <select id="theme" aria-label="Website theme">
-            <option value="system">System</option>
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
-          </select></label
-        >
-      </footer>
-    </div>
-  </body>
-</html>
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ClipVault — A little memory for your clipboard.</title>
+  <meta name="description" content="Find the text, links and images you copied earlier. ClipVault is a free, open-source Linux clipboard manager that keeps your history on your computer.">
+  <link rel="icon" href="assets/clipvault.svg" type="image/svg+xml">
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="style.css">
+  <script src="release-data.js" defer></script><script src="site.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><div class="container header-inner">
+  <a class="brand" href="#main"><img src="assets/clipvault.svg" width="30" height="34" alt="">ClipVault<span class="brand-label">FOR LINUX</span></a>
+  <nav aria-label="Main navigation"><a href="#features">Features</a><a href="#how">How it works</a><a href="#downloads">Downloads</a><a href="#faq">FAQ</a></nav>
+  <div class="header-actions"><a class="github-link" href="https://github.com/Amibiplob/ClipVault">GitHub ↗</a><label class="theme-control"><span class="sr-only">Website theme</span><select id="theme" aria-label="Website theme"><option value="system">◐ System</option><option value="light">☀ Light</option><option value="dark">☾ Dark</option></select></label><a class="button small" href="#downloads">Download <span aria-hidden="true">↓</span></a></div>
+</div></header>
+<main id="main">
+<section class="container hero">
+  <div class="hero-copy"><span class="badge"><span class="status-dot"></span> A small tool. A little less starting over.</span>
+    <h1>Copied it?<br><span>Keep it.</span></h1>
+    <p class="hero-description">Your clipboard remembers one thing.<br>ClipVault helps you find the rest.</p>
+    <p class="hero-detail">Bring back the text, links, and images you copied earlier. A searchable clipboard history, right on your Linux desktop.</p>
+    <div class="flex flex-wrap gap-3 mt-8"><a class="button" href="#downloads">Get ClipVault for Linux <span aria-hidden="true">↓</span></a><a class="button secondary" href="#how">See how it works <span aria-hidden="true">↗</span></a></div>
+    <div class="hero-meta"><span>Free & open source</span><span>MIT licensed</span><span data-version>Latest on GitHub</span></div>
+    <a class="quiet-link" href="#downloads">DEB, RPM, or AppImage? Find your fit →</a>
+  </div>
+  <figure class="app-stage"><div class="stage-grid" aria-hidden="true"></div><div class="stage-caption"><span class="status-dot"></span> YOUR CLIPBOARD, A LITTLE MORE USEFUL</div>
+    <img class="app-screenshot" src="history.png" width="440" height="540" alt="Actual ClipVault app with search, content filters, saved clips and a preview" fetchpriority="high">
+    <div class="shortcut-note"><span class="shortcut-icon" aria-hidden="true">⌘</span><div>Your history. One shortcut away.<br><kbd>Super</kbd> <span>+</span> <kbd>V</kbd></div></div>
+    <figcaption>Actual native app capture · <a href="https://github.com/Amibiplob/ClipVault/blob/main/docs/SCREENSHOT.md">Screenshot details ↗</a></figcaption>
+  </figure>
+</section>
+<div class="principles"><div class="container flex flex-wrap justify-between gap-5"><span><span aria-hidden="true">⌂</span> Lives on your computer</span><span><span aria-hidden="true">◎</span> No account needed</span><span><span aria-hidden="true">⌨</span> Made for your keyboard</span><span><span aria-hidden="true">&lt;/&gt;</span> Open source, always inspectable</span></div></div>
+<section id="features" class="container section-pad">
+  <div class="section-top"><div><span class="eyebrow">LESS RECOPYING. MORE DOING.</span><h2>A home for the things<br>you’ll need again.</h2></div><p>The link you just lost. A handy snippet. That image from a moment ago. Keep your flow, and your useful copies.</p></div>
+  <div class="feature-grid">
+    <article class="feature-card feature-wide"><div><span class="feature-icon" aria-hidden="true">⌕</span><h3>Find your “I just copied that.”</h3><p>Search your local history and filter by text, images, links, or pinned clips. Saved history survives app restarts.</p><div class="format-chips"><span>Text</span><span>Images</span><span>Links</span><span>Rich content</span></div></div><div class="search-illustration" aria-label="Illustration of clipboard search"><div>⌕ <span>meeting notes</span><span class="key-hint">Ctrl F</span></div><p><span>▤</span> Meeting notes <span class="illustration-tag">TEXT</span></p><small>Search illustration · your own clips appear in the app</small></div></article>
+    <article class="feature-card"><span class="feature-icon" aria-hidden="true">♧</span><h3>Keep the keepers.</h3><p>Pin a clip to keep it out of automatic age and count cleanup. Your everyday snippets stay close.</p></article>
+    <article class="feature-card"><span class="feature-icon" aria-hidden="true">✎</span><h3>Edit without losing the original.</h3><p>Make a quick change to saved text. Editing saves a new clip and keeps the original intact.</p></article>
+    <article class="feature-card"><span class="feature-icon" aria-hidden="true">▥</span><h3>Your space. Your view.</h3><p>Go Compact for a focused list, or Comfortable for a split preview. Navigate clips with ↑ / ↓ and Enter.</p></article>
+    <article class="feature-card"><span class="feature-icon" aria-hidden="true">☷</span><h3>A little less clutter.</h3><p>Set age and unpinned-count limits, clear unpinned history, or pause monitoring whenever you need.</p></article>
+  </div>
+  <p class="section-footnote">Supported formats depend on the source app. File references point to your original files; they aren’t backups.</p>
+</section>
+<section id="how" class="how-section"><div class="container section-pad"><div class="section-heading"><span class="eyebrow">FAMILIAR FROM THE FIRST COPY</span><h2>Copy. Find. Back to it.</h2><p>No new workflow to learn. Just a memory for the one you have.</p></div>
+  <ol class="steps-grid"><li><span class="step-number">01</span><div class="step-keys"><kbd>Ctrl</kbd> + <kbd>C</kbd></div><h3>Copy as usual</h3><p>Copy text or an image while ClipVault is running and monitoring is on.</p></li><li><span class="step-number">02</span><div class="step-keys"><kbd>Super</kbd> + <kbd>V</kbd></div><h3>Open your history</h3><p>Use your configured shortcut. Super is usually the Windows key.</p></li><li><span class="step-number">03</span><div class="step-keys"><kbd>↑</kbd> <kbd>↓</kbd> <kbd>Enter</kbd></div><h3>Choose your clip</h3><p>Search, click a clip, or move with the arrow keys and press Enter.</p></li><li><span class="step-number">04</span><div class="step-keys"><kbd>Ctrl</kbd> + <kbd>V</kbd></div><h3>Keep going</h3><p>On X11, ClipVault hides and attempts to paste. On Wayland, or if focus can’t be restored, press Ctrl+V yourself.</p></li></ol>
+  <p class="section-footnote">A paste request can’t confirm the receiving app accepted it. If needed, focus your app and press Ctrl+V.</p>
+</div></section>
+<section id="downloads" class="container section-pad"><div class="section-heading"><span class="eyebrow">MAKE ROOM FOR A LITTLE MEMORY</span><h2>Meet your new clipboard.</h2><p>Choose a package for the computer you’ll use it on. All packages below are for <strong>x86-64 / amd64</strong>.</p><p id="release-status" class="release-status" role="status">Checking the latest stable GitHub release…</p></div>
+  <div class="download-grid">
+    <article class="download-card"><div class="package-heading"><span class="package-symbol" aria-hidden="true">▱</span><span class="package-label">MINT & UBUNTU</span></div><h3>The DEB package<span>.deb</span></h3><p>For the Mint 22.x / Ubuntu 24.04 build baseline. Install it with your system’s package manager.</p><div class="package-size" data-size>x86-64 · size on GitHub</div><a class="button package-button" data-format="deb" aria-disabled="true">Checking availability…</a><details><summary>Installation instructions</summary><p>Open the downloaded package with your package installer, or use:</p><code>sudo apt install ./clipvault_VERSION-1_amd64.deb</code><p>Replace VERSION with the downloaded filename’s version.</p></details></article>
+    <article class="download-card recommended"><div class="package-heading"><span class="package-symbol" aria-hidden="true">◇</span><span class="package-label">PORTABLE OPTION</span></div><h3>The AppImage<span>.AppImage</span></h3><p>Keep it in a folder you choose. Uses the same glibc 2.39 baseline; host graphics libraries are still needed.</p><div class="package-size" data-size>x86-64 · size on GitHub</div><a class="button package-button" data-format="AppImage" aria-disabled="true">Checking availability…</a><details><summary>Installation instructions</summary><p>Enable executable permission in Properties, then open it. Or run:</p><code>chmod +x ClipVault-VERSION-x86_64.AppImage<br>./ClipVault-VERSION-x86_64.AppImage</code><p>If FUSE is unavailable, add <code>--appimage-extract-and-run</code>. Keep the file in a stable location for shortcuts.</p></details></article>
+    <article class="download-card"><div class="package-heading"><span class="package-symbol" aria-hidden="true">⬡</span><span class="package-label">FEDORA 44</span></div><h3>The RPM package<span>.rpm</span></h3><p>Built specifically for Fedora 44. Other Fedora versions and RPM distributions require separate testing.</p><div class="package-size" data-size>x86-64 · size on GitHub</div><a class="button package-button" data-format="rpm" aria-disabled="true">Checking availability…</a><details><summary>Installation instructions</summary><p>Use a published RPM only on its supported Fedora release:</p><code>sudo dnf install ./clipvault-VERSION-1.x86_64.rpm</code></details></article>
+  </div>
+  <div class="download-links"><a href="https://github.com/Amibiplob/ClipVault/releases">GitHub Releases & older versions ↗</a><a id="release-notes-link" href="https://github.com/Amibiplob/ClipVault/releases">Release notes ↗</a><a id="checksums" href="https://github.com/Amibiplob/ClipVault/releases">Verification files on GitHub ↗</a></div>
+  <details class="verification-details"><summary>How do I check my download?</summary><p>Download the release’s <code>vVERSION-SHA256SUMS</code> into the same folder, then run <code>sha256sum --check --ignore-missing vVERSION-SHA256SUMS</code>. Confirm that your package reports OK. Checksums detect changed bytes; the app updater also requires a valid Ed25519 signature on its manifest. <a href="https://github.com/Amibiplob/ClipVault/blob/main/packaging/UPDATER.md">Signature verification details ↗</a></p></details>
+  <noscript><p>JavaScript is off. Download available packages directly from <a href="https://github.com/Amibiplob/ClipVault/releases">GitHub Releases</a>.</p></noscript>
+</section>
+<section class="container privacy-section" id="privacy"><div class="privacy-card"><span class="feature-icon" aria-hidden="true">⌂</span><span class="eyebrow">YOUR CLIPS STAY CLOSE</span><h2>On your computer.<br>Under your control.</h2><p>No account, cloud sync, or telemetry. History normally lives in <code>~/.local/share/clipvault/</code>, or under <code>$XDG_DATA_HOME</code>.</p><p><strong>History is not encrypted.</strong> Pause monitoring before copying sensitive information. Optional update checks contact GitHub without sending clipboard contents.</p><a href="https://github.com/Amibiplob/ClipVault#privacy-and-storage">Read about privacy & storage →</a></div><div class="compatibility-copy"><span class="eyebrow">A NOTE ABOUT LINUX</span><h2>A desktop companion.<br>With honest limits.</h2><p>Local build and archive checks were run on Mint 22.3 / Cinnamon. Real-app paste and installed upgrades still need desktop testing. Ubuntu, Fedora, MATE, Xfce, and Plasma integration is not fully verified.</p><p>On X11, capture and automatic paste are implemented. On Wayland, background capture needs ext-data-control or wlr-data-control support, which some GNOME sessions don’t expose. Pasting uses the manual Ctrl+V fallback.</p><p>DEB and AppImage builds require glibc 2.39 or newer. AppImage does not make older Linux versions compatible.</p><a href="https://github.com/Amibiplob/ClipVault/blob/main/COMPATIBILITY.md">See the detailed compatibility record ↗</a></div></section>
+<section id="faq" class="container section-pad faq-section"><div><span class="eyebrow">GOOD TO KNOW</span><h2>A few answers.<br>Then you’re off.</h2><p>Still stuck? <a href="https://github.com/Amibiplob/ClipVault/issues">Let’s work it out on GitHub ↗</a></p></div><div class="faqs">
+<details><summary>What does ClipVault do?</summary><p>It keeps a searchable local history of supported text, images, links, rich content, and file references you copy while it is running. Choose an earlier clip to reuse it. Copies made before monitoring started cannot be recovered.</p></details>
+<details><summary>Which download should I choose?</summary><p>Choose DEB for the Mint 22.x / Ubuntu 24.04 baseline, RPM for Fedora 44, or AppImage for a portable file on a compatible glibc 2.39+ system. All current packages target x86-64. Check the compatibility record for what has actually been tested.</p></details>
+<details><summary>How do I install it?</summary><p>Open a DEB in your package installer, install an RPM with dnf, or make the AppImage executable and open it. Expand the instructions on your download card for the exact commands. No public APT repository or PPA is assumed to be available.</p></details>
+<details><summary>How do I use Super+V?</summary><p>Launch ClipVault from your application menu, then press Super+V. Super is usually the Windows key. Press the shortcut again to hide history. Close hides the panel and keeps monitoring running; Quit in About stops the app. For manual setup, Shortcuts shows the exact command; a normal installed package uses <code>clipvault --toggle</code>.</p></details>
+<details><summary>What if the shortcut conflicts?</summary><p>Open ClipVault → Shortcuts and record another combination, or review your desktop’s Keyboard settings. ClipVault keeps other apps’ bindings intact. Plain Ctrl+V is reserved for pasting. Plasma and unsupported desktops need manual setup using the exact command shown in Shortcuts.</p></details>
+<details><summary>Does selecting a clip paste automatically?</summary><p>Arrow keys only move selection. Clicking a row or pressing Enter restores the clip, hides history, and attempts paste on X11 after restoring the previous app’s focus. If unavailable, use Ctrl+V in your target app. Wayland uses this manual fallback. Pin, edit, and menu actions do not activate the clip.</p></details>
+<details><summary>Does history survive a restart?</summary><p>Yes, history, pins, and preferences are saved locally. Optional cleanup rules can remove unpinned clips. Clear unpinned history on reboot is off by default; it uses the Linux boot ID, so restarting only ClipVault or updating the app does not trigger it.</p></details>
+<details><summary>What happens to pinned clips?</summary><p>Pins are excluded from automatic age and unpinned-count cleanup, including reboot cleanup and Clear unpinned. You can unpin or individually delete them. Deleting a pinned clip identifies it in the confirmation when confirmations are enabled.</p></details>
+<details><summary>Can I pause monitoring?</summary><p>Yes. Use Pause in the app toolbar and resume when ready. Copies made while paused are not saved. Phrase exclusions and password-manager hints help but do not guarantee detection of sensitive data; images are not scanned for secrets.</p></details>
+<details><summary>How does cleanup work?</summary><p>Optional age and unpinned-count rules remove eligible unpinned clips. Age uses last-used time, or capture/legacy time. Clear unpinned affects all unpinned history, including clips hidden by search and filters. Confirm before deleting controls whether a confirmation appears. Pins are kept.</p></details>
+<details><summary>How do updates work?</summary><p>About → App updates checks GitHub for stable releases. Automatic installation requires a matching package and CPU, supported distribution, trusted Ed25519-signed metadata, and a matching SHA-256 checksum. The current source has no provisioned public trust key, so automatic installation remains disabled until maintainer setup. Manual downloads remain available. Repository-managed installations use the system Update Manager.</p></details>
+<details><summary>Which desktops are tested?</summary><p>The local Mint 22.3 / Cinnamon environment has automated UI, storage, and extracted-package evidence. External-app paste and privileged installed upgrades remain unverified. GNOME, MATE, Xfce, Plasma, Fedora, and Wayland need further desktop testing; consult the compatibility record for exact limits.</p></details>
+<details><summary>Where can I report a problem?</summary><p><a href="https://github.com/Amibiplob/ClipVault/issues">Open a GitHub issue</a> with the app version, distribution/version, desktop, X11 or Wayland session, package type, reproduction steps, and expected result. <code>clipvault --diagnostics</code> can help. Remove private clipboard content and credentials from logs and screenshots.</p></details>
+</div></section>
+<section class="container"><div class="closing-cta"><div><span class="eyebrow">PICK UP WHERE YOU COPIED OFF</span><h2>Your next good idea<br>deserves a little memory.</h2><p>Free, open source, and right on your computer.</p></div><a class="button" href="#downloads">Get ClipVault <span aria-hidden="true">↓</span></a></div></section>
+</main>
+<footer class="container"><div class="footer-top"><a class="brand" href="#main"><img src="assets/clipvault.svg" width="25" height="29" alt="">ClipVault</a><p>A little memory for your clipboard.</p><a href="https://github.com/Amibiplob/ClipVault">Project source ↗</a><a href="https://github.com/Amibiplob/ClipVault/issues">Report a problem ↗</a></div><div class="footer-bottom"><p>Made by <strong>Md Biplob Hosain</strong></p><div><a href="https://amibiplob.vercel.app">Portfolio ↗</a><a href="https://github.com/Amibiplob">GitHub ↗</a><a href="https://linkedin.com/in/amibiplob">LinkedIn ↗</a><a href="https://github.com/Amibiplob/ClipVault/blob/main/LICENSE">MIT License</a></div></div></footer>
+</body></html>

@@ -1,0 +1,28 @@
+name: PPA source candidate
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.89.0
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: noble-ppa-rust1.89-${{ hashFiles('Cargo.lock') }}
+      - run: sudo apt-get update && sudo apt-get install -y dpkg-dev devscripts debhelper lintian
+      - run: bash scripts/prepare-ppa-source.sh --online
+      - run: lintian target/ppa-source/*_source.changes
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clipvault-unsigned-source-candidate
+          overwrite: true
+          path: target/ppa-source/clipvault_*.*
+          if-no-files-found: error

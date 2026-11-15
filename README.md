@@ -1,121 +1,161 @@
-# ClipVault 2.2.0
+<p align="center"><img src="assets/clipvault.svg" width="64" alt="ClipVault logo"></p>
 
-<img src="assets/clipvault.svg" alt="ClipVault logo" width="70">
+# ClipVault
 
-**Your clipboard. With a memory.** ClipVault is a native Linux clipboard manager by **Md Biplob Hosain**. Find copied text, code, links, images, supported rich content, and file references. Keep history locally, pin useful clips, and reuse them without an account or cloud sync.
+**A little memory for your clipboard.** ClipVault saves supported text, links, images, rich content, and file references you copy on Linux. Search your history, pin useful clips, and bring an earlier copy back without an account or cloud sync.
 
-![Actual ClipVault desktop window](docs/history.png)
+[Download packages](https://github.com/Amibiplob/ClipVault/releases/latest) · [Website](https://amibiplob.github.io/ClipVault/) · [Report a problem](https://github.com/Amibiplob/ClipVault/issues)
 
-The screenshot is an actual app capture, not an illustrative mockup. See [verification](V2.0.0-VERIFICATION.md) for capture provenance and its limits.
+![Actual ClipVault desktop window with searchable history](docs/history.png)
 
-Settings now use **← Back** (Back to clipboard history), responsive navigation and a scrollbar near the right edge. Larger filled accent pins identify pinned clips in both themes; pin clicks never copy or paste. See [v2.2.0 verification](V2.2.0-VERIFICATION.md) for current checks, artifact paths and limitations.
+Actual native app capture, not a mockup; [capture provenance and limits](docs/SCREENSHOT.md). Source version is **2.2.0**; use GitHub Releases to see the latest version actually published.
 
 ## Download and install
 
-Use [GitHub Releases](https://github.com/Amibiplob/ClipVault/releases) for packages actually published. This source upgrade is **2.2.0**; release publication is a separate step. The [website source](docs/index.html) looks up published package assets and falls back to Releases if lookup fails.
+All current packages target **x86-64 (amd64)**. Choose for the machine you will run it on:
 
-- **.deb:** compatible Mint/Ubuntu/Debian-family systems. Open the downloaded file with your package installer, or `sudo apt install ./clipvault_VERSION-1_amd64.deb`.
-- **AppImage:** portable x86-64 option. Enable executable permission, then open it. If FUSE is unavailable, try `--appimage-extract-and-run`. Keep it in a stable location before setting shortcuts/startup; `bash scripts/install-appimage.sh` optionally installs a user-menu launcher.
-- **.rpm:** Fedora 44 source-build/container recipe prepared. No RPM has been built here because the build tools/container runtime and network are unavailable. After a verified Fedora build, install with `sudo dnf install ./clipvault-2.2.0-1.x86_64.rpm`; other RPM distributions require separate packages/tests.
+| Package | Choose it for | Install |
+|---|---|---|
+| DEB | Mint 22.x / Ubuntu 24.04 build baseline | Open with your package installer, or `sudo apt install ./clipvault_VERSION-1_amd64.deb` |
+| RPM | Fedora 44 specifically | `sudo dnf install ./clipvault-VERSION-1.x86_64.rpm` |
+| AppImage | A portable file on a compatible Linux system | Make executable in Properties, then open it |
 
-The current binary build baseline is **glibc 2.39, x86-64** (Mint 22.x / Ubuntu 24.04). AppImage does not make it compatible with older glibc. Consult the [compatibility table](COMPATIBILITY.md): native rendering and archive checks do not prove real-app paste, physical reboot, or installation on every desktop.
+Replace `VERSION` with the downloaded version. For AppImage in a terminal:
 
-## First launch and shortcuts
+```sh
+chmod +x ClipVault-VERSION-x86_64.AppImage
+./ClipVault-VERSION-x86_64.AppImage
+```
 
-Leave monitoring on, copy something in another application, then press **Super+V** (Super is usually the Windows key). Press again to hide. Close hides the panel and keeps capture running; Quit in About stops ClipVault.
+DEB and AppImage use a **glibc 2.39** baseline. Older Mint/Ubuntu systems do not become compatible by choosing AppImage. Graphics libraries and a working desktop are required. If FUSE is unavailable, try `./ClipVault-VERSION-x86_64.AppImage --appimage-extract-and-run`. Keep the file in a stable location for startup and shortcuts; [optional AppImage menu integration](packaging/README.md).
 
-Cinnamon, GNOME, MATE and Xfce use their desktop custom-shortcut settings where supported. Cinnamon runs the installed executable with `--toggle`; ClipVault releases its internal grab for that combination. The exact stable executable and any `--data-dir` are included. KDE Plasma and other unsupported setups show manual instructions and the exact command in **Shortcuts**. A configured desktop binding is not labelled independently active merely because it was saved.
+Only download package files actually attached to the release. There is no confirmed live APT repository or PPA to add. Release checksums cover the actual files; [verification and signing details](packaging/UPDATER.md).
 
-If Super+V is occupied: “Super+V is already used by another action. Choose a different shortcut, or change the existing binding in your desktop’s Keyboard settings.” Choose another shortcut or open Keyboard settings. ClipVault does not remove someone else’s action. Record with modifier keys plus a letter/number, release to finish, or Escape to cancel. Modifier-only input does not save. Plain Ctrl+V is reserved for application paste. A failed replacement keeps/restores the previous binding; unavailable restoration is reported.
+## Your first copy
 
-## Copy → open history → select → paste
+1. Open **ClipVault** from your application menu, or run `clipvault`. Open the AppImage itself for a portable installation.
+2. Leave monitoring on and copy text or an image in another app.
+3. Press **Super+V** to open history. Super is usually the Windows key. Search or move through clips with the arrow keys.
+4. Click a row or press **Enter**. ClipVault restores supported clipboard formats, hides, and attempts paste on X11 after restoring the prior app’s focus. On Wayland, or if focus cannot be verified, focus your app and press **Ctrl+V** yourself.
 
-1. Copy normally while ClipVault is running and monitoring.
-2. Open history; search and filter. **↑ / ↓** changes selection without copying.
-3. Click a row or press **Enter**. ClipVault restores supported saved formats, hides and attempts paste on X11 after restoring the prior application’s focus and waiting for modifiers to release.
-4. If automatic paste is unavailable or focus cannot be verified, the item stays copied: **“Copied—press Ctrl+V to paste.”** A paste request does not prove the destination accepted it.
+Arrow keys only select; they do not copy. Pin, edit, delete, and menu buttons do not activate the row. Use the explicit **Copy** action if you only want to copy. A paste request cannot confirm that another app accepted it; not every app accepts every format.
 
-Wayland background capture needs ext-data-control or wlr-data-control; some GNOME sessions do not expose it. Wayland paste uses manual Ctrl+V fallback. File references point to your original files; moving/deleting those files can break paste. Pin/edit/delete/menu buttons do not activate a row. Use the explicit **Copy** menu/preview action when you only want to copy.
+Press the configured shortcut again to hide. Closing the window keeps monitoring running. **Quit** in About stops ClipVault, and copies made while it is stopped or paused are not saved.
 
-| Keys | Action |
+| Shortcut | Action |
 |---|---|
-| Super+V | Toggle history, where registered |
+| Super+V | Show/hide history, when registered |
 | ↑ / ↓ | Select previous/next clip |
-| Enter | Activate selected clip and attempt paste |
-| Escape | Cancel dialog / return / hide history |
+| Enter | Restore selected clip and attempt paste |
 | Ctrl+F | Focus search |
 | Ctrl+Shift+P | Pin/unpin selected clip |
-| Delete | Delete according to confirmation preference |
+| Delete | Delete selected clip, following the confirmation preference |
+| Escape | Cancel a dialog, go back, or hide history |
 | Tab | Move between controls |
 
-## History, layouts and cleanup
+### If Super+V conflicts
 
-Activation moves the same record to newest-first history and retains selection identity and pin. Capture and last-used times are separate, shown in local time; hover/details show exact times. Original capture times overwritten by older versions cannot be reconstructed and are marked unavailable.
+Open **Settings → Shortcuts** and record another combination, or review your desktop’s Keyboard settings. ClipVault does not remove another app’s binding. Plain Ctrl+V is reserved for pasting. Supported Cinnamon, GNOME, MATE, and Xfce setups use desktop custom shortcuts; Plasma and unsupported setups show manual instructions. Use the **exact command shown in Shortcuts** for your executable and data folder. For a normal system installation this is `clipvault --toggle`. A saved binding still needs a real keyboard check on your desktop.
 
-Compact is a narrow list; Comfortable adds one preview and a draggable divider. Both remember their own dimensions and maximized state. Theme supports System/Light/Dark, installed font family and size. Native window placement remains subject to desktop restrictions.
+## Everyday features
 
-Editing opens a dialog: **Save as new clip** preserves the original, and Cancel changes nothing. Automatic cleanup has optional age and unpinned-count rules; either rule may remove eligible unpinned clips. Age uses last-used, otherwise saved capture/legacy time. Pins never expire or count toward the unpinned limit. **Clear unpinned** deletes all unpinned history, including clips hidden by search or filters, and keeps pins. It is disabled when no unpinned clips remain and follows **Confirm before deleting**; the confirmation uses **Cancel** / **Delete unpinned**. Turning confirmation off performs the same clearly labelled operation immediately. Deleting an individual pinned clip identifies that pin in confirmation.
+- **Local history:** search saved content, filter by type, and restore supported formats. File references point to original files; moving or deleting those files can break paste.
+- **Pins:** protect useful clips from automatic cleanup and Clear unpinned. Individual pins can still be deleted.
+- **Safe text editing:** Save as new clip preserves the original.
+- **Two layouts:** Compact for a narrow list, Comfortable for a split preview with a draggable divider. Each remembers its own size. Light, Dark, and System themes and installed fonts are supported.
+- **Keyboard navigation:** select without copying, activate when ready, and focus search directly.
+- **Cleanup controls:** optional age and unpinned-count limits. Either rule can remove eligible unpinned clips; age uses last-used time, otherwise capture/legacy time. Pins never expire or count toward the unpinned limit.
+- **Clear unpinned:** affects all unpinned history, including items hidden by search/filters, and keeps pins. Confirm before deleting controls whether confirmation appears.
+- **Pause and privacy controls:** pause capture, exclude textual phrases, and use supported password-manager hints. These do not guarantee sensitive-data detection; images are not scanned.
 
-**Clear unpinned history on reboot** is off by default. It uses a changed Linux boot ID; app-only restart and package update do not count as reboot. History persists across restart/reboot by default, subject to your enabled cleanup rules.
+History survives app restarts by default, subject to your cleanup rules. **Clear unpinned history on reboot** is optional and off by default. It uses the Linux boot ID; restarting only ClipVault or updating its package does not count as reboot.
+
+## Tested compatibility
+
+| Environment | Current evidence and limits |
+|---|---|
+| Mint 22.3 / Cinnamon / X11 | Local automated UI, storage, and extracted DEB/AppImage checks; live external-app paste and privileged package upgrades remain unverified |
+| Ubuntu 24.04 / GNOME | DEB build baseline; desktop integration and installation need testing |
+| Fedora 44 | Dedicated RPM container build/install/screenshot checks are configured in CI; no successful Fedora build is claimed from this workspace |
+| MATE, Xfce, Plasma | Integration or manual shortcut paths implemented; real desktop acceptance still needed |
+| Wayland | Capture requires ext-data-control or wlr-data-control; stock GNOME sessions may not expose it. Manual Ctrl+V fallback for paste |
+
+See the [full compatibility record](COMPATIBILITY.md). There is no Windows/macOS build and no promise of universal Linux compatibility.
 
 ## Privacy and storage
 
-Normal storage: `$XDG_DATA_HOME/clipvault/`, usually `~/.local/share/clipvault/`. Settings → Privacy shows the exact folder and opens it. SQLite stores metadata/settings; `items/` holds MIME bytes/thumbnails. Storage is **not encrypted**. Private account permissions help; deletion is not guaranteed secure erasure and does not clear backups or the system clipboard.
+History stays on your computer, normally in `$XDG_DATA_HOME/clipvault/` or `~/.local/share/clipvault/`. **Settings → Privacy** shows the exact location. SQLite holds metadata/settings and `items/` contains original MIME bytes and thumbnails. **History is not encrypted.** Private account permissions help; deletion is not guaranteed secure erasure and does not clear backups or your system clipboard.
 
-Pause monitoring before copying sensitive data. Phrase exclusions scan textual formats; images are not scanned. Supported password-manager MIME hints are respected. X11 app exclusions use approximate active-window identity; Wayland app identity is unavailable. These are useful hints, not complete sensitive-data detection. No telemetry or cloud sync; optional GitHub update checks contact GitHub without clipboard contents.
+There is no telemetry or cloud sync. Optional release checks contact GitHub without sending clipboard contents. Phrase exclusions, password-manager hints, and approximate X11 app exclusions are useful safeguards, not complete detection. Wayland app identity is unavailable. Pause before copying sensitive information.
 
 ## Updates and troubleshooting
 
-About → App updates shows the current/available versions, release notes and detected installation.
-Click Update to download the matching .deb, compatible Fedora-release .rpm or running AppImage.
-The updater uses executable package ownership and AppImage runtime information, matches the CPU,
-requires an Ed25519-signed manifest and checks SHA-256, package identity and version before installing.
-DEB/RPM installation requests system administrator authorization without collecting a password.
-Repository-managed installations use the system Update Manager. AppImages use atomic replacement
-with a rollback copy. Unknown installations, read-only locations, missing compatible packages or
-missing signatures offer official manual downloads. This candidate has no maintainer signing key
-configured, so automatic installation remains disabled pending that external setup.
+**About → App updates** checks for newer stable releases. The implemented updater matches the running package ownership or AppImage runtime, CPU, and supported distribution. It requires an Ed25519-signed manifest trusted by the app, then verifies file size, SHA-256, package identity, and version. DEB/RPM installation uses the system authorization dialog; repository-managed installs use Update Manager. AppImage replacement retains a rollback copy. Restart preserves history, pins, settings, and launch arguments and waits for pending edits/activation.
 
-Progress and failures appear in About. Downloads can be canceled; system installation must finish.
-Restart waits for edits/paste and pending changes, flushes storage and preserves launch arguments,
-history, pins, settings, geometry and shortcuts. Completion is reported only by the expected new
-running version. App-only restarts do not trigger reboot cleanup. [Maintainer signing workflow,
-key rotation, compatibility and recovery](packaging/UPDATER.md).
+**One-time maintainer signing setup is still required:** `packaging/update-keys.json` is empty. Automatic installation stays disabled until a trusted public key is embedded and matching signed metadata is published. Missing signatures and unsupported installs offer official manual downloads. See [updater protocol, trust, and recovery](packaging/UPDATER.md).
 
-- **Shortcut unavailable:** use Shortcuts → Open Keyboard settings; review conflicts, or record a different combination. Verify the displayed command and actual desktop/session. A saved desktop action is not proof of activation.
-- **No history/capture:** resume monitoring, inspect Privacy exclusions, run `clipvault --diagnostics`, and check session protocol support. Copies made while ClipVault is stopped cannot be recovered.
-- **Nothing pasted:** focus the intended app and press Ctrl+V. Never infer acceptance from a submitted XTEST event. Not every app accepts every rich/image/file format.
-- **Image preview unavailable:** original formats are still retained. Decoder availability/size limits can affect preview.
-- **Storage error:** check free space/permissions. Stop ClipVault and back up the entire data directory before repairs; do not delete the database to “fix” an upgrade.
+| Problem | What to try |
+|---|---|
+| Nothing captured | Resume monitoring, review Privacy exclusions and your session’s data-control support |
+| Nothing pasted | Focus the intended app and press Ctrl+V; check whether it accepts the saved format |
+| Shortcut does nothing | Check conflicts and the command in Shortcuts, then test it on your desktop |
+| Preview missing | Decoder/size limits may affect previews; original supported formats remain stored |
+| Storage error | Check disk space and permissions; stop ClipVault and back up its entire data folder before repairs |
 
-No signed APT repository or PPA is live from this task. [Launchpad PPA preparation](packaging/LAUNCHPAD-PPA.md) targets Ubuntu 24.04 Noble / Mint 22.x amd64 with Rust/Cargo 1.89 and complete offline vendoring; clean source builds and publication remain blocked. [Independent signed APT repository preparation](packaging/APT-REPOSITORY.md) remains available. Do not use invented APT commands.
+[Report an issue](https://github.com/Amibiplob/ClipVault/issues) with app/package version, distribution/version, desktop, X11/Wayland session, package type, steps to reproduce, and expected behavior. Include `clipvault --diagnostics` output when useful. Remove clipboard contents and secrets from screenshots/logs. Do not delete the database as an upgrade fix.
 
-## Build, package and contribute
+## Build and package from source
 
-From the repository root (`app/` in this Craft Anything workspace):
+Run from the repository root (`app/` in this Craft Anything workspace). Rust 1.89.0 is used in Ubuntu CI; the application requires Rust 1.88 or newer. Keep `Cargo.lock` committed.
 
 ```sh
 cargo fetch --locked
 cargo build --release --locked --offline
 cargo test --locked --offline
-cargo clippy --locked --offline --all-targets -- -D warnings
 cargo fmt -- --check
+cargo clippy --locked --offline --all-targets -- -D warnings
+python3 scripts/test-update-metadata.py
+python3 scripts/test-release.py
+```
+
+On the Noble/Mint 22.x build baseline, install the [documented packaging dependencies](packaging/README.md), then:
+
+```sh
+bash scripts/install-packaging-tools.sh
 python3 scripts/packaging-support.py notices
-bash scripts/install-packaging-tools.sh # only if tools are missing; requires network
 python3 scripts/extract-cached-runtime.py
 LDAI_RUNTIME_FILE="$PWD/target/packaging-tools/runtime-x86_64" bash scripts/package-linux.sh all
 bash scripts/test-linux-packages.sh
-bash scripts/package-rpm.sh container --online # Fedora container; network/tooling required
-bash scripts/prepare-ppa-source.sh --online   # source only; then clean-build, sign, dput
-cargo test --offline performance_large_history -- --ignored --nocapture
+# Separate disposable Fedora 44 environment; needs network and a working container runtime:
+CONTAINER_ENGINE=docker bash scripts/package-rpm.sh container --online
 ```
 
-[Packaging guide](packaging/README.md) · [Migration](MIGRATION.md) · [Performance measurements](PERFORMANCE.md) · [Changelog](CHANGELOG.md) · [Release notes](RELEASE-NOTES.md).
+[Packaging guide](packaging/README.md) · [Migration](MIGRATION.md) · [Performance](PERFORMANCE.md) · [Changelog](CHANGELOG.md).
 
-Open an issue with distribution/version, desktop, X11/Wayland, package format and reproduction steps. Keep private clipboard contents out of reports. For contributions, keep changes focused, preserve old data, add targeted regressions, run checks, and submit a pull request. Desktop claims need exact platform/app evidence; headless UI tests are not external paste verification.
+For the static Tailwind website, use Node 24 and run `npm ci`, `npm run build`, `npm test`, and `npm run test:browser` (Chrome required). Output is `target/site/`; dependencies and build output are ignored. [Website and Pages guide](docs/WEBSITE.md).
+
+## Automated releases
+
+After one-time signing and repository setup, update versions and the changelog, commit, and push a matching tag. **Example next version: 2.2.1**:
+
+```sh
+git add Cargo.toml Cargo.lock CHANGELOG.md packaging/linux/io.clipvault.desktop.metainfo.xml
+git commit -m "Prepare ClipVault 2.2.1"
+git push origin main
+git tag -a v2.2.1 -m "ClipVault 2.2.1"
+git push origin v2.2.1
+```
+
+Make the version edits before these commands. Actions verifies the exact tagged commit, tests, builds/validates DEB + AppImage on Ubuntu 24.04 and RPM on Fedora 44, signs metadata, and attaches all finished files to a GitHub Release automatically. No manual package upload is required. Published files are never replaced on retries. Manual **Release packages → Run workflow** accepts an existing tag; `publish=false` is a nonpublishing rehearsal and is the default.
+
+Read the [complete maintainer release guide](packaging/RELEASING.md) for exact version edits, signing secret creation, safe retries, failure logs, prerequisites, and post-release checks. App version remains 2.2.0 in this change; the website’s private npm package has its own tooling version.
+
+## Contributing
+
+Open an issue or focused pull request. Preserve existing history and settings, explain behavior changes, add relevant regressions, and run the checks above. Label headless, extracted-package, live-provider, and real-desktop evidence accurately. The release workflow is not a substitute for testing physical keyboard shortcuts, external-app paste, or installed upgrades.
 
 ## License and developer
 
-MIT License; see [LICENSE](LICENSE) and [third-party notices](THIRD-PARTY-NOTICES.txt). The existing `assets/clipvault.svg` is the app, launcher, package and website logo.
+[MIT License](LICENSE) · [Third-party notices](THIRD-PARTY-NOTICES.txt)
 
-**Md Biplob Hosain** · [GitHub](https://github.com/Amibiplob) · [Project](https://github.com/Amibiplob/ClipVault) · [Portfolio](https://amibiplob.vercel.app) · [LinkedIn](https://linkedin.com/in/amibiplob) · [Report an issue](https://github.com/Amibiplob/ClipVault/issues)
+**Md Biplob Hosain** · [Portfolio](https://amibiplob.vercel.app) · [GitHub](https://github.com/Amibiplob) · [LinkedIn](https://linkedin.com/in/amibiplob)

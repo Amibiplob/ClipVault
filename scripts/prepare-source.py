@@ -32,7 +32,7 @@ def main():
     archive.unlink(missing_ok=True)
     shutil.rmtree(source, ignore_errors=True)
     source.mkdir(parents=True)
-    for name in ["Cargo.toml", "Cargo.lock", "src", "assets", "docs", "scripts", "packaging"]:
+    for name in ["Cargo.toml", "Cargo.lock", "package.json", "package-lock.json", "tailwind.config.cjs", "src", "assets", "docs", "scripts", "packaging"]:
         path = ROOT / name
         if path.is_dir():
             shutil.copytree(path, source / name, ignore=shutil.ignore_patterns(

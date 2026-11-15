@@ -1,38 +1,51 @@
 'use strict';
-const root = document.documentElement;
-const themes = ['system', 'light', 'dark'];
 const themeInput = document.querySelector('#theme');
-function setTheme(value) {
-  const theme = themes.includes(value) ? value : 'system';
-  root.dataset.theme = theme;
-  themeInput.value = theme;
-  try { localStorage.setItem('clipvault-theme', theme); } catch (_) { /* private browser */ }
+themeInput.value = document.documentElement.dataset.theme;
+themeInput.addEventListener('change', event => {
+  const theme = ['system', 'light', 'dark'].includes(event.target.value) ? event.target.value : 'system';
+  document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem('clipvault-theme', theme); } catch (_) {}
+});
+const api = window.ClipVaultRelease;
+function applyRelease(data, cached = false) {
+  const release = api.parse(data);
+  document.querySelectorAll('[data-version]').forEach(node => { node.textContent = release.tag; });
+  let count = 0;
+  document.querySelectorAll('[data-format]').forEach(link => {
+    const asset = release.assets[link.dataset.format];
+    link.removeAttribute('href');
+    link.setAttribute('aria-disabled', 'true');
+    link.textContent = 'Package not in this release';
+    link.closest('article').querySelector('[data-size]').textContent = 'x86-64 · not in this release';
+    if (asset) {
+      link.href = asset.url;
+      link.removeAttribute('aria-disabled');
+      link.textContent = `Download .${link.dataset.format}`;
+      link.closest('article').querySelector('[data-size]').textContent = `${(asset.size / 1024 / 1024).toFixed(1)} MiB · x86-64`;
+      count++;
+    }
+  });
+  const checksum = document.querySelector('#checksums');
+  checksum.href = release.checksum || release.notes;
+  checksum.textContent = release.checksum ? 'Download SHA-256 checksums ↗' : 'Check verification files on GitHub ↗';
+  document.querySelector('#release-notes-link').href = release.notes;
+  document.querySelector('#release-status').textContent = `${cached ? 'Last checked release' : 'Latest stable release'}: ${release.tag} · ${count} package${count === 1 ? '' : 's'} available${cached ? '. Refreshing from GitHub…' : '.'}`;
 }
-try { setTheme(localStorage.getItem('clipvault-theme')); } catch (_) { setTheme('system'); }
-themeInput.addEventListener('change', e => setTheme(e.target.value));
-async function release() {
-  const status = document.querySelector('#release-status');
+async function loadRelease() {
+  let cached;
   try {
-    const config = await fetch('release.json').then(r => { if (!r.ok) throw Error('config'); return r.json(); });
-    document.querySelectorAll('[data-version]').forEach(node => { node.textContent = config.version; });
-    const response = await fetch(`https://api.github.com/repos/${config.repository}/releases/latest`, { signal: AbortSignal.timeout(7000) });
-    if (!response.ok) throw Error('release lookup');
+    cached = JSON.parse(localStorage.getItem('clipvault-release-cache'));
+    if (Date.now() - cached.checked < 86400000 && cached.checked <= Date.now()) applyRelease(cached.data, true);
+    else cached = null;
+  } catch (_) { cached = null; }
+  try {
+    const response = await fetch(`https://api.github.com/repos/${api.repository}/releases/latest`, { signal: AbortSignal.timeout(7000), headers: { Accept: 'application/vnd.github+json' } });
+    if (!response.ok) throw Error('GitHub unavailable');
     const data = await response.json();
-    if (data.draft || data.prerelease || !/^v?\.?\d+\.\d+\.\d+$/.test(data.tag_name)) throw Error('not stable');
-    const base = `https://github.com/${config.repository}/releases/download/`;
-    let count = 0;
-    document.querySelectorAll('[data-format]').forEach(link => {
-      const format = link.dataset.format;
-      const asset = (data.assets || []).find(a => a.name.endsWith(`.${format}`) && a.browser_download_url.startsWith(base) && /^https:\/\/github\.com\//.test(a.browser_download_url));
-      if (asset) {
-        link.href = asset.browser_download_url;
-        link.textContent = `↓ Download ${format} · ${data.tag_name}`;
-        count++;
-      }
-    });
-    status.textContent = `Latest published release: ${data.tag_name}. ${count ? 'Available package links are shown below.' : 'Check GitHub Releases for package availability.'} The source upgrade shown here is ${config.version}.`;
+    applyRelease(data);
+    try { localStorage.setItem('clipvault-release-cache', JSON.stringify({ data, checked: Date.now() })); } catch (_) {}
   } catch (_) {
-    status.textContent = 'Release lookup unavailable. Use GitHub Releases below to see the packages actually published; v2.2.0 publication is not assumed.';
+    document.querySelector('#release-status').textContent = cached ? 'GitHub is unavailable. Showing release data checked within the last 24 hours; confirm availability on GitHub Releases.' : 'Release information is unavailable right now. Find published packages on GitHub Releases.';
   }
 }
-release();
+loadRelease();

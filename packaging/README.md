@@ -1,3 +1,5 @@
+See [automated releases and exact maintainer commands](RELEASING.md) for tag-triggered build, signing, publishing, and safe reruns.
+
 # v2.2.0 signed integrated updates
 
 See [UPDATER.md](UPDATER.md) for detection, compatibility, system authorization, metadata generation, signing, key rotation and publication. Package scripts generate unsigned metadata and checksums for actual current-version artifacts; maintainer key provisioning, final signing and publication remain separate.

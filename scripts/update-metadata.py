@@ -9,6 +9,7 @@ import pathlib
 import re
 import subprocess
 import tomllib
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 BASE = 'https://github.com/Amibiplob/ClipVault/releases/download/'
@@ -18,26 +19,37 @@ def run(*args):
     return subprocess.check_output(args, text=True).strip()
 
 
-def generate(dist, tag=None):
+def release_notes(version):
+    # One canonical changelog feeds the release and signed updater metadata.
+    text = (ROOT / 'CHANGELOG.md').read_text()
+    match = re.search(r'^#{1,2} ' + re.escape(version) + r'(?:\s+[^\n]*)?\n(.*?)(?=^#{1,2} |\Z)', text, re.M | re.S)
+    if not match or not match[1].strip():
+        raise ValueError(f'Missing CHANGELOG.md section for {version}')
+    return match[1].strip() + '\n'
+
+
+def generate(dist, tag=None, packages=None):
     version = tomllib.loads((ROOT / 'Cargo.toml').read_text())['package']['version']
     tag = tag or 'v' + version
-    if not re.fullmatch(r'v?\.?\d+\.\d+\.\d+', tag) or re.sub(r'^v\.?', '', tag) != version:
-        raise ValueError('Tag must match the current stable version')
+    if not re.fullmatch(r'v?\.?\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?', tag) or re.sub(r'^v\.?', '', tag) != version:
+        raise ValueError('Tag must match the current package version')
     artifacts = []
     for path in sorted(dist.iterdir()):
         if not path.is_file():
             continue
         name = path.name
+        if packages and path.suffix.lstrip('.').lower() not in packages:
+            continue
         platforms = []
         if name == f'clipvault_{version}-1_amd64.deb':
             identity = [run('dpkg-deb', '-f', str(path), f) for f in ('Package', 'Version', 'Architecture')]
-            if identity != ['clipvault', version + '-1', 'amd64']:
+            if identity != ['clipvault', version.replace('-', '~', 1) + '-1', 'amd64']:
                 raise ValueError(f'Wrong DEB identity: {identity}')
             kind, arch = 'deb', 'x86_64'
             platforms = [{'id': 'ubuntu', 'release': '24.04'}] + [{'id': 'linuxmint', 'release': v} for v in ['22', '22.1', '22.2', '22.3']]
         elif name == f'clipvault-{version}-1.x86_64.rpm':
             identity = run('rpm', '-qp', '--qf', '%{NAME}\n%{VERSION}-%{RELEASE}\n%{ARCH}\n%{DISTRIBUTION}', str(path)).splitlines()
-            if identity != ['clipvault', version + '-1', 'x86_64', 'Fedora 44']:
+            if identity != ['clipvault', version.replace('-', '~', 1) + '-1', 'x86_64', 'Fedora 44']:
                 raise ValueError(f'Wrong RPM identity or untested distribution: {identity}')
             kind, arch = 'rpm', 'x86_64'
             platforms = [{'id': 'fedora', 'release': '44'}]
@@ -58,13 +70,13 @@ def generate(dist, tag=None):
     if not artifacts:
         raise ValueError('No actual current-version artifacts found')
     manifest = {'schema': 1, 'repository': 'Amibiplob/ClipVault', 'version': version,
-                'release_notes': (ROOT / f'CHANGELOG-v{version}.txt').read_text(), 'artifacts': artifacts}
+                'release_notes': release_notes(version), 'artifacts': artifacts}
     target = dist / 'clipvault-update.json'
     content = (json.dumps(manifest, indent=2, ensure_ascii=False) + '\n').encode()
     target.write_bytes(content)
     # Regeneration invalidates any old detached signature.
     target.with_suffix('.json.sig').unlink(missing_ok=True)
-    (dist / 'v2.2.0-SHA256SUMS').write_text(''.join(f"{a['sha256']}  {a['filename']}\n" for a in artifacts))
+    (dist / f'{tag}-SHA256SUMS').write_text(''.join(f"{a['sha256']}  {a['filename']}\n" for a in artifacts))
     return target
 
 
@@ -84,7 +96,27 @@ def sign(target, key):
     if sig.stat().st_size != 64:
         sig.unlink()
         raise ValueError('Unexpected Ed25519 signature length')
+    verify(target)
     print('Signed exact JSON bytes with the embedded trusted Ed25519 key')
+
+
+def verify(target):
+    signature = target.with_suffix('.json.sig')
+    if signature.stat().st_size != 64:
+        raise ValueError('Expected a raw 64-byte Ed25519 signature')
+    keys = json.loads((ROOT / 'packaging/update-keys.json').read_text())
+    for key in keys:
+        if not re.fullmatch('[0-9a-fA-F]{64}', key):
+            raise ValueError('Invalid trusted public key')
+        with tempfile.TemporaryDirectory(prefix='clipvault-public-') as folder:
+            public = pathlib.Path(folder) / 'public.der'
+            public.write_bytes(bytes.fromhex('302a300506032b6570032100' + key))
+            result = subprocess.run(['openssl', 'pkeyutl', '-verify', '-pubin', '-keyform', 'DER',
+                                     '-inkey', str(public), '-rawin', '-in', str(target),
+                                     '-sigfile', str(signature)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if result.returncode == 0:
+                return
+    raise ValueError('Signature does not verify with the public key trusted by the app')
 
 
 def main():
@@ -92,8 +124,21 @@ def main():
     parser.add_argument('--dist', type=pathlib.Path, default=ROOT / 'dist')
     parser.add_argument('--tag')
     parser.add_argument('--signing-key', type=pathlib.Path)
+    parser.add_argument('--verify-only', action='store_true')
+    parser.add_argument('--require-all', action='store_true')
+    parser.add_argument('--packages', nargs='+', choices=['deb', 'rpm', 'appimage'], help='Only inspect formats produced by this packaging job')
     opts = parser.parse_args()
-    target = generate(opts.dist.resolve(), opts.tag)
+    if opts.verify_only:
+        verify(opts.dist.resolve() / 'clipvault-update.json')
+        return
+    if opts.require_all:
+        if opts.packages and set(opts.packages) != {'deb', 'rpm', 'appimage'}:
+            parser.error('--require-all cannot select a partial package set')
+        version = tomllib.loads((ROOT / 'Cargo.toml').read_text())['package']['version']
+        for name in [f'clipvault_{version}-1_amd64.deb', f'clipvault-{version}-1.x86_64.rpm', f'ClipVault-{version}-x86_64.AppImage']:
+            if not (opts.dist / name).is_file():
+                raise ValueError(f'Missing required release asset: {name}')
+    target = generate(opts.dist.resolve(), opts.tag, opts.packages)
     if opts.signing_key:
         sign(target, opts.signing_key)
     else:
