@@ -23,23 +23,23 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       # Always build the default branch, never code/artifacts from a workflow_run payload.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '24'
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run build && npm test && npm run test:browser
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: website-browser-evidence-${{ github.run_attempt }}
           path: target/website-checks/
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: target/site
   deploy:
@@ -52,5 +52,5 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@v5
         id: deployment

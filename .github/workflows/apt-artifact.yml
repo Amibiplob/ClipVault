@@ -14,7 +14,7 @@ jobs:
   prepare:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: sudo apt-get update && sudo apt-get install -y apt-utils gnupg
       - name: Fetch exact release artifact
         env:
@@ -35,7 +35,7 @@ jobs:
           trap 'rm -rf "$GNUPGHOME"' EXIT
           printf '%s' "$SIGNING_KEY" | gpg --batch --import
           bash scripts/prepare-apt-repository.sh clipvault.deb target/apt-repository "$SIGNING_FINGERPRINT"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: signed-apt-repository
           path: target/apt-repository/

@@ -1,6 +1,6 @@
 [package]
 name = "clipvault"
-version = "2.2.1"
+version = "2.2.2"
 edition = "2021"
 rust-version = "1.88"
 description = "Private native Linux clipboard history"
@@ -23,6 +23,9 @@ assets = [
     ["packaging/README.md", "usr/share/doc/clipvault/packaging/README.md", "644"],
     ["docs/WEBSITE.md", "usr/share/doc/clipvault/docs/WEBSITE.md", "644"],
     ["docs/SCREENSHOT.md", "usr/share/doc/clipvault/docs/SCREENSHOT.md", "644"],
+    ["CHANGELOG-v2.2.2.txt", "usr/share/doc/clipvault/CHANGELOG-v2.2.2.txt", "644"],
+    ["V2.2.2-VERIFICATION.md", "usr/share/doc/clipvault/V2.2.2-VERIFICATION.md", "644"],
+    ["RELEASE-FAILURE-VERIFICATION.md", "usr/share/doc/clipvault/RELEASE-FAILURE-VERIFICATION.md", "644"],
     ["CHANGELOG-v2.2.1.txt", "usr/share/doc/clipvault/CHANGELOG-v2.2.1.txt", "644"],
     ["V2.2.1-VERIFICATION.md", "usr/share/doc/clipvault/V2.2.1-VERIFICATION.md", "644"],
     ["CHANGELOG-v2.2.0.txt", "usr/share/doc/clipvault/CHANGELOG-v2.2.0.txt", "644"],

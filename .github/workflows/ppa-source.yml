@@ -7,11 +7,11 @@ jobs:
   source:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.89.0
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -20,7 +20,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y dpkg-dev devscripts debhelper lintian
       - run: bash scripts/prepare-ppa-source.sh --online
       - run: lintian target/ppa-source/*_source.changes
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: clipvault-unsigned-source-candidate
           overwrite: true

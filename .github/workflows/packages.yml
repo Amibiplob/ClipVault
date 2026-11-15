@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag to rebuild (for example v2.2.1)
+        description: Existing version tag to rebuild (for example v2.2.2)
         required: true
         type: string
       publish:
@@ -24,7 +24,7 @@ jobs:
       tag: ${{ steps.resolve.outputs.tag }}
       commit: ${{ steps.resolve.outputs.commit }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -46,14 +46,14 @@ jobs:
     env:
       RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ needs.preflight.outputs.commit }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.89.0
         with:
           components: rustfmt, clippy
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -63,7 +63,8 @@ jobs:
       - name: Install Noble runtime and validation dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libsqlite3-0 libgdk-pixbuf-2.0-0 libgdk-pixbuf2.0-bin webp-pixbuf-loader libxkbcommon-x11-0 desktop-file-utils appstream libgl1 libegl1 patchelf ripgrep xvfb
+          xargs -a packaging/linux/build-packages.txt sudo apt-get install -y
+          python3 scripts/packaging-support.py preflight
       - name: Test, build and validate DEB and AppImage
         shell: bash
         run: |
@@ -77,12 +78,13 @@ jobs:
           cargo clippy --locked --offline --all-targets -- -D warnings
           python3 scripts/test-update-metadata.py
           python3 scripts/test-release.py
+          python3 scripts/test-packaging.py
           bash scripts/install-packaging-tools.sh
           python3 scripts/packaging-support.py notices
           python3 scripts/extract-cached-runtime.py
           LDAI_RUNTIME_FILE="$PWD/target/packaging-tools/runtime-x86_64" bash scripts/package-linux.sh all
           LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a bash scripts/test-linux-packages.sh --gui
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: release-noble
           overwrite: true
@@ -90,7 +92,7 @@ jobs:
             dist/*.deb
             dist/*.AppImage
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: diagnostics-noble-${{ github.run_attempt }}
@@ -99,12 +101,12 @@ jobs:
     needs: preflight
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ needs.preflight.outputs.commit }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.89.0
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -116,27 +118,35 @@ jobs:
         run: |
           export SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
           bash scripts/package-rpm.sh container --online
-      - uses: actions/upload-artifact@v4
+      - name: Check exact RPM upload inputs, permissions, symlinks, disk and ZIP
+        id: rpm-upload
+        if: always()
+        run: python3 scripts/check-release-upload.py
+      - uses: actions/upload-artifact@v6
         with:
           name: release-fedora
           overwrite: true
-          path: dist/*.rpm
+          path: ${{ steps.rpm-upload.outputs.package }}
+          compression-level: 0
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: diagnostics-fedora-${{ github.run_attempt }}
-          path: dist/*.log
+          path: |
+            ${{ steps.rpm-upload.outputs.diagnostics }}
+            target/release-logs/fedora-upload.log
+          if-no-files-found: error
   sign:
     needs: [preflight, deb-appimage, fedora-rpm]
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ needs.preflight.outputs.commit }}
           persist-credentials: false
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: release-*
           merge-multiple: true
@@ -159,13 +169,19 @@ jobs:
           python3 scripts/release-support.py --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --dist dist
           python3 scripts/update-metadata.py --dist dist --tag "$RELEASE_TAG" --require-all --signing-key "$key_file"
           python3 scripts/publish-release.py --dist dist --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --dry-run
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: signed-release-bundle
           overwrite: true
-          path: dist/
+          path: |
+            dist/*.deb
+            dist/*.AppImage
+            dist/*.rpm
+            dist/clipvault-update.json
+            dist/clipvault-update.json.sig
+            dist/v*-SHA256SUMS
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: diagnostics-signing-${{ github.run_attempt }}
@@ -177,12 +193,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ needs.preflight.outputs.commit }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: signed-release-bundle
           path: dist
@@ -195,7 +211,7 @@ jobs:
           set -euo pipefail
           mkdir -p target/release-logs
           python3 scripts/publish-release.py --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --dist dist 2>&1 | tee target/release-logs/publish.log
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: diagnostics-publishing-${{ github.run_attempt }}

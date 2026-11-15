@@ -1,3 +1,11 @@
+clipvault (2.2.2-1~ppa1~noble1) noble; urgency=medium
+
+  * Fix packaging prerequisites and report bundled library failures together.
+  * Add artifact-upload safeguards and update GitHub Actions.
+  * Preserve signing and validation; hosted Fedora RPM verification is pending.
+
+ -- Md Biplob Hosain <amibiplob@users.noreply.github.com>  Sun, 15 Nov 2026 22:30:00 +0600
+
 clipvault (2.2.1-1~ppa1~noble1) noble; urgency=medium
 
   * Prepare signed release automation, redesigned website and release documentation.

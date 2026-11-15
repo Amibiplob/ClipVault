@@ -8,7 +8,7 @@
 
 ![Actual ClipVault desktop window with searchable history](docs/history.png)
 
-Actual native app capture, not a mockup; [capture provenance and limits](docs/SCREENSHOT.md). Source version is **2.2.1**; use GitHub Releases to see the latest version actually published.
+Actual native app capture, not a mockup; [capture provenance and limits](docs/SCREENSHOT.md). Source version is **2.2.2**; use GitHub Releases to see the latest version actually published.
 
 ## Download and install
 
@@ -92,7 +92,7 @@ There is no telemetry or cloud sync. Optional release checks contact GitHub with
 
 **About → App updates** checks for newer stable releases. The implemented updater matches the running package ownership or AppImage runtime, CPU, and supported distribution. It requires an Ed25519-signed manifest trusted by the app, then verifies file size, SHA-256, package identity, and version. DEB/RPM installation uses the system authorization dialog; repository-managed installs use Update Manager. AppImage replacement retains a rollback copy. Restart preserves history, pins, settings, and launch arguments and waits for pending edits/activation.
 
-**One-time maintainer signing setup is still required:** `packaging/update-keys.json` is empty. Automatic installation stays disabled until a trusted public key is embedded and matching signed metadata is published. Missing signatures and unsupported installs offer official manual downloads. See [updater protocol, trust, and recovery](packaging/UPDATER.md).
+**Maintainer signing setup must be verified:** the existing public key in `packaging/update-keys.json` is preserved. Its presence does not establish that the matching private Actions secret is configured or that signed metadata has been published. Missing signatures and unsupported installs offer official manual downloads. See [updater protocol, trust, and recovery](packaging/UPDATER.md).
 
 | Problem | What to try |
 |---|---|
@@ -136,19 +136,19 @@ For the static Tailwind website, use Node 24 and run `npm ci`, `npm run build`, 
 
 ## Automated releases
 
-Source is prepared for **2.2.1**; no tag has been created or pushed. After one-time signing and repository setup and successful checks, the maintainer can explicitly authorize publication using the following commands:
+Source is prepared for **2.2.2**; no tag has been created or pushed. After one-time signing and repository setup and successful checks, the maintainer can explicitly authorize publication using the following commands:
 
 ```sh
-git add Cargo.toml Cargo.lock CHANGELOG.md CHANGELOG-v2.2.1.txt RELEASE-NOTES.md V2.2.1-VERIFICATION.md src/ui.rs packaging/linux/io.clipvault.desktop.metainfo.xml README.md COMPATIBILITY.md scripts/packaging-support.py scripts/test-linux-packages.sh debian/changelog debian/rules packaging/RELEASING.md packaging/README.md packaging/UPDATER.md packaging/VALIDATION.md
-git commit -m "Prepare ClipVault 2.2.1"
+git add Cargo.toml Cargo.lock CHANGELOG.md CHANGELOG-v2.2.2.txt RELEASE-NOTES.md V2.2.2-VERIFICATION.md src/ui.rs packaging/linux/io.clipvault.desktop.metainfo.xml README.md COMPATIBILITY.md scripts/packaging-support.py scripts/test-linux-packages.sh debian/changelog debian/rules packaging/RELEASING.md packaging/README.md packaging/UPDATER.md packaging/VALIDATION.md .github/workflows/packages.yml .github/workflows/pages.yml .github/workflows/apt-artifact.yml .github/workflows/ppa-source.yml scripts/package-linux.sh scripts/package-rpm.sh scripts/check-release-upload.py scripts/test-packaging.py packaging/linux/build-packages.txt RELEASE-FAILURE-VERIFICATION.md
+git commit -m "Prepare ClipVault 2.2.2"
 git push origin main
-git tag -a v2.2.1 -m "ClipVault 2.2.1"
-git push origin v2.2.1
+git tag -a v2.2.2 -m "ClipVault 2.2.2"
+git push origin v2.2.2
 ```
 
 Review all release changes and checks before these commands. Actions verifies the exact tagged commit, tests, builds/validates DEB + AppImage on Ubuntu 24.04 and RPM on Fedora 44, signs metadata, and attaches all finished files to a GitHub Release automatically. No manual package upload is required. Published files are never replaced on retries. Manual **Release packages → Run workflow** accepts an existing tag; `publish=false` is a nonpublishing rehearsal and is the default.
 
-Read the [complete maintainer release guide](packaging/RELEASING.md) for exact version edits, signing secret creation, safe retries, failure logs, prerequisites, and post-release checks. App source version is 2.2.1; the website’s private npm package has its own tooling version.
+Read the [complete maintainer release guide](packaging/RELEASING.md) for exact version edits, signing secret creation, safe retries, failure logs, prerequisites, and post-release checks. App source version is 2.2.2; the website’s private npm package has its own tooling version.
 
 ## Contributing
 

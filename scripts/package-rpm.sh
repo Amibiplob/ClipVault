@@ -10,6 +10,9 @@ esac
 mkdir -p dist
 # Keep previous attempts, including failures, intact.
 log=$(mktemp "$PWD/dist/rpm-$version-$mode-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX.log")
+# Native builds run as root inside Docker. These build-only diagnostics must be
+# readable by the host runner's artifact uploader (mktemp defaults to 0600).
+chmod 0644 "$log"
 build_rpm() {
 echo "ClipVault $version RPM build ($mode)"
 echo "Build log: $log"
@@ -63,7 +66,7 @@ case $mode in
         else
             echo 'RPM built; installation/launch tests require a disposable Fedora container.'
         fi
-        cp -- "$package" "dist/clipvault-$version-1.x86_64.rpm"
+        install -m 0644 -- "$package" "dist/clipvault-$version-1.x86_64.rpm"
         (cd dist && sha256sum "clipvault-$version-1.x86_64.rpm" > RPM-SHA256SUMS)
         python3 scripts/update-metadata.py --packages rpm
         ;;

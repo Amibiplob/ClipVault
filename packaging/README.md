@@ -1,24 +1,35 @@
 See [automated releases and exact maintainer commands](RELEASING.md) for tag-triggered build, signing, publishing, and safe reruns.
 
-# v2.2.1 release preparation and signed integrated updates
+# v2.2.2 release preparation and signed integrated updates
 
 See [UPDATER.md](UPDATER.md) for detection, compatibility, system authorization, metadata generation, signing, key rotation and publication. Package scripts generate unsigned metadata and checksums for actual current-version artifacts; maintainer key provisioning, final signing and publication remain separate.
 
-# Linux packaging — ClipVault 2.2.1
+# Linux packaging — ClipVault 2.2.2
 
 Run from the repository root (`app/` here). Debian/AppImage builds target Ubuntu
 24.04 / Mint 22.x x86-64, glibc 2.39. AppImage still needs compatible host glibc
 and graphics drivers. Fedora RPMs compile separately against Fedora; they never
 convert a Debian package or reuse its bundled libraries. See
-[current verification](../V2.2.1-VERIFICATION.md) and
+[current verification](../V2.2.2-VERIFICATION.md) and
 [desktop compatibility](../COMPATIBILITY.md) for measured limits.
 
 ## Debian and AppImage
 
-On a disposable Noble build host, install `build-essential pkg-config binutils
- dpkg-dev python3 curl desktop-file-utils appstream patchelf` and the runtime
-packages listed in Cargo.toml (`package.metadata.deb.depends`), plus
-`libgdk-pixbuf2.0-bin webp-pixbuf-loader fontconfig`. Use Rust >=1.88.
+On a disposable Noble build host, install the same complete prerequisites used
+by Actions, including **libxcb-shape0**, then check every bundled library, loader,
+and their linkage before compiling or creating packages. Use Rust >=1.88.
+
+```sh
+sudo apt-get update
+xargs -a packaging/linux/build-packages.txt sudo apt-get install -y
+python3 scripts/packaging-support.py preflight
+```
+
+The canonical package list includes the runtime dependencies in Cargo.toml
+(`package.metadata.deb.depends`) and the packaging/validation tools. Preflight
+aggregates missing/unreadable x86-64 libraries and unresolved dependencies with
+installation instructions; it runs again before AppDir staging and preserves
+previous staging if a required runtime input is unavailable.
 
 ```sh
 cargo fetch --locked
@@ -26,16 +37,17 @@ bash scripts/install-packaging-tools.sh # network; only when tools are missing
 cargo test --locked --offline
 cargo clippy --locked --offline --all-targets -- -D warnings
 cargo fmt -- --check
+python3 scripts/test-packaging.py
 python3 scripts/packaging-support.py notices
 python3 scripts/extract-cached-runtime.py
 LDAI_RUNTIME_FILE="$PWD/target/packaging-tools/runtime-x86_64" bash scripts/package-linux.sh all
 bash scripts/test-linux-packages.sh
 ```
 
-For 2.2.1, successful release builds are expected to create:
+For 2.2.2, successful release builds are expected to create:
 
-- `dist/clipvault_2.2.1-1_amd64.deb`
-- `dist/ClipVault-2.2.1-x86_64.AppImage`
+- `dist/clipvault_2.2.2-1_amd64.deb`
+- `dist/ClipVault-2.2.2-x86_64.AppImage`
 
 `package-linux.sh` accepts `all`, `deb`, `appimage`, `stage`. Smoke checks inspect
 metadata, version, x86-64 ELF, runtime libraries, loaders, icons and notices.
@@ -43,10 +55,10 @@ metadata, version, x86-64 ELF, runtime libraries, loaders, icons and notices.
 Extraction tests do not prove apt installation or FUSE. SHA256SUMS also includes
 historical packages; use the exact intended filename.
 
-After downloading a verified published package, install with `sudo apt install ./clipvault_2.2.1-1_amd64.deb`. For AppImage, run
-`chmod +x ClipVault-2.2.1-x86_64.AppImage` then
-`./ClipVault-2.2.1-x86_64.AppImage`. If FUSE is unavailable, use
-`./ClipVault-2.2.1-x86_64.AppImage --appimage-extract-and-run`.
+After downloading a verified published package, install with `sudo apt install ./clipvault_2.2.2-1_amd64.deb`. For AppImage, run
+`chmod +x ClipVault-2.2.2-x86_64.AppImage` then
+`./ClipVault-2.2.2-x86_64.AppImage`. If FUSE is unavailable, use
+`./ClipVault-2.2.2-x86_64.AppImage --appimage-extract-and-run`.
 Keep a stable executable location before configuring shortcuts/startup;
 `bash scripts/install-appimage.sh` can install a user menu launcher.
 
@@ -101,16 +113,25 @@ dependencies, installation without `--nodeps`, version, isolated Xvfb/software
 screenshot launch and uninstall retaining fixture history. This does not prove
 real desktop capture/paste/shortcuts or an installed v2.0 upgrade.
 
-Expected output only after success: `dist/clipvault-2.2.1-1.x86_64.rpm`.
+Expected output only after success: `dist/clipvault-2.2.2-1.x86_64.rpm`.
 The script prints the absolute output path after success and saves build output,
 including the actual failure and exit status, in a unique
-`dist/rpm-2.2.1-container-<UTC timestamp>-<unique id>.log` (or `native`) file.
+`dist/rpm-2.2.2-container-<UTC timestamp>-<unique id>.log` (or `native`) file.
 Earlier logs are preserved. Container preflight records the resolved CLI path,
 working directory, `--version`, `info` and both exit statuses before image builds.
+Build logs and the exported RPM have mode 0644 so the host runner can read
+root-created container outputs. `python3 scripts/check-release-upload.py` checks
+only the current-version RPM and build logs: regular files, permissions, symlinks,
+available disk space, and an actual temporary ZIP with CRC readback. Its report is
+`target/release-logs/fedora-upload.log`. It does not replace RPM validation or
+prove that GitHub accepted an upload; inspect the full failed upload-step logs
+before assigning a cause to a ZIP error. Actions uploads the exact RPM separately
+from diagnostics, without the build tree, and uses no ZIP compression for the
+already compressed package.
 It copies the RPM
 to `dist/` after checksum validation and any required container installation tests.
 Install a verified Fedora package with
-`sudo dnf install ./clipvault-2.2.1-1.x86_64.rpm`.
+`sudo dnf install ./clipvault-2.2.2-1.x86_64.rpm`.
 A previous sandbox retry found Podman installed, but it could not start the builder:
 `mkdir /run/user/1000/libpod: read-only file system`. A diagnostic with runtime
 and data directories under `target/podman/` instead reached a second restriction:
@@ -133,7 +154,7 @@ Rust/Cargo 1.89 and offline Cargo vendoring. See
 preparation, clean builds, signing and `dput ppa:amibiplob/clipvault`. All owner
 signing/upload commands are explicitly marked for the regular Linux Mint Terminal.
 See [PPA verification](PPA-VERIFICATION.md) for historical source artifact, toolchain
-and offline dependency results; those artifacts are not 2.2.1 packages, and no accepted upload or publication is claimed.
+and offline dependency results; those artifacts are not 2.2.2 packages, and no accepted upload or publication is claimed.
 
 The independent [signed binary APT workflow](APT-REPOSITORY.md) remains available
 and is distinct from Launchpad source builds. The [Release packages workflow](RELEASING.md)
@@ -145,7 +166,7 @@ confirmed by published GitHub Releases, retaining light/dark/system themes.
 
 Stop ClipVault and back up the whole data directory, including SQLite WAL and
 payload files, before upgrading. Install the newer package over the older one and
-keep the same data location or `--data-dir`. v2.2.1 changes no schema, setting name
+keep the same data location or `--data-dir`. v2.2.2 changes no schema, setting name
 or shortcut format; existing migrations remain. AppImages should keep the stable
 path used by startup/shortcuts. Normal uninstall and Debian purge never delete
 personal clipboard history.

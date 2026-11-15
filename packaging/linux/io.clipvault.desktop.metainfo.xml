@@ -26,6 +26,7 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="2.2.2" date="2026-11-15"><description><p>Packaging dependency fixes, clearer bundled library and loader checks, artifact-upload safeguards, and updated GitHub Actions. Mandatory signing and validation are preserved. The Fedora RPM failure is not confirmed resolved; hosted Fedora build and upload verification are still pending.</p></description></release>
     <release version="2.2.1" date="2026-11-15"><description><p>Automated package releases with signed update metadata and verified publication, a redesigned responsive website with stable release downloads, and expanded installation, privacy, signing and maintainer documentation. Signing setup remains required; existing history and preferences are preserved.</p></description></release>
     <release version="2.2.0" date="2026-11-13"><description><p>Larger image previews, responsive toolbar and links, and signed installation-aware update preparation. Existing history and preferences are preserved.</p></description></release>
     <release version="2.1.0" date="2026-11-12"><description><p>Responsive settings with Back navigation, clearer pin icons, and consistent clear-unpinned history. Existing clips, pins, preferences and shortcuts are preserved.</p></description></release>

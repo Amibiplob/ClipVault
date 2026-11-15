@@ -18,6 +18,9 @@ if [[ $mode == all || $mode == appimage ]]; then
     appimage_plugin=${LINUXDEPLOY_PLUGIN_APPIMAGE:-$(command -v linuxdeploy-plugin-appimage-x86_64.AppImage || command -v linuxdeploy-plugin-appimage || true)}
     [[ -x $appimage_plugin ]] || { echo 'linuxdeploy AppImage plugin is missing; run scripts/install-packaging-tools.sh.' >&2; exit 1; }
 fi
+if [[ $mode == all || $mode == appimage || $mode == stage ]]; then
+    python3 scripts/packaging-support.py preflight
+fi
 cargo build --release --locked --offline
 python3 scripts/packaging-support.py notices --check
 desktop-file-validate packaging/linux/io.clipvault.desktop.desktop

@@ -1,6 +1,6 @@
-# ClipVault 2.2.1 — compatibility
+# ClipVault 2.2.2 — compatibility
 
-2.2.1 prepares release automation, website and documentation changes. Package/desktop evidence below is historical unless explicitly recorded in [2.2.1 verification](V2.2.1-VERIFICATION.md); earlier artifacts are not 2.2.1 packages.
+2.2.2 prepares packaging dependency fixes, clearer library checks, upload safeguards and updated GitHub Actions. Package/desktop evidence below is historical unless explicitly recorded in [2.2.2 verification](V2.2.2-VERIFICATION.md); earlier artifacts are not 2.2.2 packages. The Fedora RPM failure is not confirmed resolved; hosted verification remains pending.
 
 Tested = that exact behavior was exercised. Limited = partial evidence or a known limitation. Untested = implementation/design only. Package extraction is not installation testing.
 

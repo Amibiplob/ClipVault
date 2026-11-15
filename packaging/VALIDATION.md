@@ -1,6 +1,6 @@
-# Current release preparation: 2.2.1
+# Current release preparation: 2.2.2
 
-See [V2.2.1-VERIFICATION.md](../V2.2.1-VERIFICATION.md) for local release checks and remaining limits, and [UPDATER.md](UPDATER.md) for release-signing setup. [2.2.0 verification](../V2.2.0-VERIFICATION.md) and earlier results below are historical.
+See [V2.2.2-VERIFICATION.md](../V2.2.2-VERIFICATION.md) for local release checks and remaining limits, and [UPDATER.md](UPDATER.md) for release-signing setup. [2.2.0 verification](../V2.2.0-VERIFICATION.md) and earlier results below are historical.
 
 ---
 

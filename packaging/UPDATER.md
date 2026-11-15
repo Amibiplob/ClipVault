@@ -1,4 +1,4 @@
-# ClipVault 2.2.1 update protocol and release signing
+# ClipVault 2.2.2 update protocol and release signing
 
 The GUI remains the normal user. `pkexec /usr/bin/apt-get -y --no-remove install -- PATH`
 or `pkexec /usr/bin/dnf -y --setopt=install_weak_deps=False install -- PATH` requests
@@ -25,10 +25,13 @@ Linux distribution. Broaden these claims only after testing actual packages.
 ## Trust setup (external maintainer action REQUIRED)
 
 `packaging/update-keys.json` is an embedded array of **raw Ed25519 public keys**, each
-64 hex characters. It is empty in this source candidate because no maintainer trust key
-was supplied. Automatic installation is disabled until a maintainer provisions a key,
-rebuilds and distributes a trusted app. Do not generate a throwaway key and call it
-maintainer authentication. Never commit a private key or print it in build output.
+64 hex characters. This source preserves the existing embedded public key byte for
+byte. Its presence does not verify configuration of the matching private Actions
+secret or a published signed bundle. Automatic installation still requires trusted
+metadata and successful validation. Do not replace the existing key with a throwaway
+key or call that maintainer authentication. Never commit a private key or print it
+in build output. The following provisioning commands are for an explicitly authorized
+new-key setup; they were not run for this preparation.
 
 On the maintainer's secured machine, OUTSIDE this repository:
 
@@ -44,7 +47,7 @@ Put ONLY that public hex string in the JSON array. Review its fingerprint indepe
 rebuild all packages, test installation in disposable systems, and then generate and sign:
 
 ```sh
-python3 scripts/update-metadata.py --tag v2.2.1 --signing-key "$HOME/.local/share/clipvault-signing/release.pem"
+python3 scripts/update-metadata.py --tag v2.2.2 --signing-key "$HOME/.local/share/clipvault-signing/release.pem"
 ```
 
 This command refuses a key inside the repository, a non-Ed25519 key or a key whose public
@@ -56,7 +59,7 @@ sign only once all final artifacts have been gathered, using `--require-all` for
 The automated [release workflow](RELEASING.md) gathers all three final packages,
 then uploads the exact packages, `clipvault-update.json`, `clipvault-update.json.sig`
 (raw 64-byte detached signature) and `TAG-SHA256SUMS` into the same release. The checksum
-filename is derived from the actual tag, for example `v2.2.1-SHA256SUMS`.
+filename is derived from the actual tag, for example `v2.2.2-SHA256SUMS`.
 JSON bytes must not be reformatted after signing. `release_notes` comes from the matching
 section in `CHANGELOG.md`. Stable app updates accept v2.1.0 and legacy v.1.2.0 tag syntax,
 compare SemVer precedence, and exclude prereleases/drafts. Prerelease packaging is allowed,

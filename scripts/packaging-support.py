@@ -112,11 +112,67 @@ def library_paths():
     for line in run("/sbin/ldconfig", "-p").splitlines():
         match = re.match(r"\s*(\S+) \(.*x86-64.*\) => (.*)", line)
         if match:
-            paths.setdefault(match[1], pathlib.Path(match[2]))
+            path = pathlib.Path(match[2])
+            # A stale cache entry or another architecture must not hide a usable
+            # x86-64 library later in ldconfig's output.
+            if usable_library(path):
+                paths.setdefault(match[1], path)
     return paths
 
 
+def usable_library(path):
+    try:
+        with path.open("rb") as source:
+            header = source.read(20)
+        return (header[:6] == b"\x7fELF\x02\x01" and len(header) == 20
+                and int.from_bytes(header[18:20], "little") == 62)
+    except OSError:
+        return False
+
+
+def runtime_inputs():
+    """Resolve every explicit runtime input before changing the AppDir."""
+    paths = library_paths()
+    required = [line.strip() for line in
+                (ROOT / "packaging/linux/runtime-libraries.txt").read_text().splitlines()
+                if line.strip() and not line.lstrip().startswith("#")]
+    pixbuf = pathlib.Path("/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0")
+    files = {
+        "usr/lib/" + name: paths.get(name) for name in required
+    }
+    files["usr/bin/gdk-pixbuf-query-loaders"] = pixbuf / "gdk-pixbuf-query-loaders"
+    for name in ["libpixbufloader-gif.so", "libpixbufloader-webp.so"]:
+        relative = "gdk-pixbuf-2.0/2.10.0/loaders/" + name
+        files["usr/lib/" + relative] = pixbuf / "2.10.0/loaders" / name
+    errors = []
+    for relative, path in files.items():
+        if path is None or not usable_library(path):
+            hint = " (Ubuntu package: libxcb-shape0)" if relative.endswith("/libxcb-shape.so.0") else ""
+            errors.append(f"{relative}: missing or unreadable x86-64 ELF{hint}")
+            continue
+        result = subprocess.run(["ldd", str(path)], text=True, capture_output=True)
+        missing = re.findall(r"^\s*(\S+) => not found", result.stdout, re.M)
+        if missing:
+            errors.append(f"{relative}: unresolved dependencies: {', '.join(missing)}")
+        elif result.returncode:
+            errors.append(f"{relative}: ldd failed: {result.stderr.strip() or result.stdout.strip()}")
+    if errors:
+        raise RuntimeError("Runtime preflight failed:\n  - " + "\n  - ".join(errors)
+                           + "\nOn Ubuntu 24.04/Mint 22, install all prerequisites:\n"
+                           "  sudo apt-get update\n"
+                           "  xargs -a packaging/linux/build-packages.txt sudo apt-get install -y\n"
+                           "Then rerun python3 scripts/packaging-support.py preflight. "
+                           "If already installed, check ldconfig -p and the library symlinks.")
+    return files
+
+
+def preflight():
+    files = runtime_inputs()
+    print(f"Verified {len(files)} required x86-64 runtime libraries/tools/loaders and their linkage")
+
+
 def stage():
+    runtime = runtime_inputs()
     # This fixed generated directory is safe to rebuild. No user data is copied.
     if APPDIR.exists():
         shutil.rmtree(APPDIR)
@@ -140,7 +196,7 @@ def stage():
         copy(ROOT / f"assets/icons/{size}x{size}/clipvault.png", f"usr/share/icons/hicolor/{size}x{size}/apps/clipvault.png")
     (APPDIR / "clipvault.svg").symlink_to("usr/share/icons/hicolor/scalable/apps/clipvault.svg")
     (APPDIR / ".DirIcon").symlink_to("clipvault.svg")
-    for name in ["COMPATIBILITY.md", "PERFORMANCE.md", "MIGRATION.md", "CHANGELOG.md", "LICENSE", "THIRD-PARTY-NOTICES.txt", "README.md", "RELEASE-NOTES.md", "VERIFICATION.md", "ACTIVATION-VERIFICATION.md", "FEATURE-VERIFICATION.md", "V2.1.0-VERIFICATION.md", "CHANGELOG-v2.1.0.txt", "CHANGELOG-v2.2.0.txt", "V2.2.0-VERIFICATION.md", "CHANGELOG-v2.2.1.txt", "V2.2.1-VERIFICATION.md", "packaging/UPDATER.md"]:
+    for name in ["COMPATIBILITY.md", "PERFORMANCE.md", "MIGRATION.md", "CHANGELOG.md", "LICENSE", "THIRD-PARTY-NOTICES.txt", "README.md", "RELEASE-NOTES.md", "VERIFICATION.md", "ACTIVATION-VERIFICATION.md", "FEATURE-VERIFICATION.md", "V2.1.0-VERIFICATION.md", "CHANGELOG-v2.1.0.txt", "CHANGELOG-v2.2.0.txt", "V2.2.0-VERIFICATION.md", "CHANGELOG-v2.2.1.txt", "V2.2.1-VERIFICATION.md", "CHANGELOG-v2.2.2.txt", "V2.2.2-VERIFICATION.md", "RELEASE-FAILURE-VERIFICATION.md", "packaging/UPDATER.md"]:
         copy(ROOT / name, "usr/share/doc/clipvault/" + pathlib.Path(name).name)
     copy(ROOT / "packaging/linux/io.clipvault.desktop.metainfo.xml", "usr/share/metainfo/io.clipvault.desktop.metainfo.xml")
     copy(ROOT / "packaging/LAUNCHPAD-PPA.md", "usr/share/doc/clipvault/LAUNCHPAD-PPA.md")
@@ -151,15 +207,8 @@ def stage():
         copy(ROOT / name, "usr/share/doc/clipvault/" + name)
     copy(ROOT / "docs/history.png", "usr/share/doc/clipvault/docs/history.png")
     copy(ROOT / "assets/clipvault.svg", "usr/share/doc/clipvault/assets/clipvault.svg")
-    paths = library_paths()
-    for line in (ROOT / "packaging/linux/runtime-libraries.txt").read_text().splitlines():
-        if line and not line.startswith("#"):
-            copy(paths[line], "usr/lib/" + line)
-    pixbuf = pathlib.Path("/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0")
-    copy(pixbuf / "gdk-pixbuf-query-loaders", "usr/bin/gdk-pixbuf-query-loaders")
-    # Ship the GIF and WebP loaders actually used; avoid unrelated SVG/HEIF stacks.
-    for name in ["libpixbufloader-gif.so", "libpixbufloader-webp.so"]:
-        copy(pixbuf / "2.10.0/loaders" / name, "usr/lib/gdk-pixbuf-2.0/2.10.0/loaders/" + name)
+    for relative, source in runtime.items():
+        copy(source, relative)
     # Force the entire non-host closure, including desktop libraries normally
     # excluded by linuxdeploy. linuxdeploy will adjust ELF paths when available.
     queue = [APPDIR / name for name in sources]
@@ -245,10 +294,10 @@ def system_notices():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["notices", "stage", "system-notices", "verify-closure"])
+    parser.add_argument("action", choices=["notices", "preflight", "stage", "system-notices", "verify-closure"])
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     try:
-        {"notices": lambda: notices(args.check), "stage": stage, "system-notices": system_notices, "verify-closure": verify_closure}[args.action]()
-    except (RuntimeError, KeyError, FileNotFoundError, subprocess.CalledProcessError) as error:
+        {"notices": lambda: notices(args.check), "preflight": preflight, "stage": stage, "system-notices": system_notices, "verify-closure": verify_closure}[args.action]()
+    except (RuntimeError, OSError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"Packaging failed: {error}\n")
