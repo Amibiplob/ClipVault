@@ -1931,7 +1931,7 @@ impl VaultApp {
             ScrollArea::vertical()
                 .max_height((ctx.screen_rect().height() - 180.).max(100.))
                 .show(ui, |ui| {
-                    ui.add(Label::new(include_str!("../CHANGELOG-v2.2.0.txt")).wrap());
+                    ui.add(Label::new(include_str!("../CHANGELOG-v2.2.1.txt")).wrap());
                 });
             if ui.button("Done").clicked() {
                 self.dismiss_changelog();

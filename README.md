@@ -8,7 +8,7 @@
 
 ![Actual ClipVault desktop window with searchable history](docs/history.png)
 
-Actual native app capture, not a mockup; [capture provenance and limits](docs/SCREENSHOT.md). Source version is **2.2.0**; use GitHub Releases to see the latest version actually published.
+Actual native app capture, not a mockup; [capture provenance and limits](docs/SCREENSHOT.md). Source version is **2.2.1**; use GitHub Releases to see the latest version actually published.
 
 ## Download and install
 
@@ -136,19 +136,19 @@ For the static Tailwind website, use Node 24 and run `npm ci`, `npm run build`, 
 
 ## Automated releases
 
-After one-time signing and repository setup, update versions and the changelog, commit, and push a matching tag. **Example next version: 2.2.1**:
+Source is prepared for **2.2.1**; no tag has been created or pushed. After one-time signing and repository setup and successful checks, the maintainer can explicitly authorize publication using the following commands:
 
 ```sh
-git add Cargo.toml Cargo.lock CHANGELOG.md packaging/linux/io.clipvault.desktop.metainfo.xml
+git add Cargo.toml Cargo.lock CHANGELOG.md CHANGELOG-v2.2.1.txt RELEASE-NOTES.md V2.2.1-VERIFICATION.md src/ui.rs packaging/linux/io.clipvault.desktop.metainfo.xml README.md COMPATIBILITY.md scripts/packaging-support.py scripts/test-linux-packages.sh debian/changelog debian/rules packaging/RELEASING.md packaging/README.md packaging/UPDATER.md packaging/VALIDATION.md
 git commit -m "Prepare ClipVault 2.2.1"
 git push origin main
 git tag -a v2.2.1 -m "ClipVault 2.2.1"
 git push origin v2.2.1
 ```
 
-Make the version edits before these commands. Actions verifies the exact tagged commit, tests, builds/validates DEB + AppImage on Ubuntu 24.04 and RPM on Fedora 44, signs metadata, and attaches all finished files to a GitHub Release automatically. No manual package upload is required. Published files are never replaced on retries. Manual **Release packages → Run workflow** accepts an existing tag; `publish=false` is a nonpublishing rehearsal and is the default.
+Review all release changes and checks before these commands. Actions verifies the exact tagged commit, tests, builds/validates DEB + AppImage on Ubuntu 24.04 and RPM on Fedora 44, signs metadata, and attaches all finished files to a GitHub Release automatically. No manual package upload is required. Published files are never replaced on retries. Manual **Release packages → Run workflow** accepts an existing tag; `publish=false` is a nonpublishing rehearsal and is the default.
 
-Read the [complete maintainer release guide](packaging/RELEASING.md) for exact version edits, signing secret creation, safe retries, failure logs, prerequisites, and post-release checks. App version remains 2.2.0 in this change; the website’s private npm package has its own tooling version.
+Read the [complete maintainer release guide](packaging/RELEASING.md) for exact version edits, signing secret creation, safe retries, failure logs, prerequisites, and post-release checks. App source version is 2.2.1; the website’s private npm package has its own tooling version.
 
 ## Contributing
 

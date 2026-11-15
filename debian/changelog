@@ -1,3 +1,10 @@
+clipvault (2.2.1-1~ppa1~noble1) noble; urgency=medium
+
+  * Prepare signed release automation, redesigned website and release documentation.
+  * Preserve existing history and preferences; signing setup remains required.
+
+ -- Md Biplob Hosain <amibiplob@users.noreply.github.com>  Sun, 15 Nov 2026 22:00:00 +0600
+
 clipvault (2.2.0-1~ppa1~noble1) noble; urgency=medium
 
   * Improve history/image/settings layouts and prepare signed integrated Linux updates.

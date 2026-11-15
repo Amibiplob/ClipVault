@@ -1,4 +1,4 @@
-# ClipVault 2.2.0 update protocol and release signing
+# ClipVault 2.2.1 update protocol and release signing
 
 The GUI remains the normal user. `pkexec /usr/bin/apt-get -y --no-remove install -- PATH`
 or `pkexec /usr/bin/dnf -y --setopt=install_weak_deps=False install -- PATH` requests
@@ -44,7 +44,7 @@ Put ONLY that public hex string in the JSON array. Review its fingerprint indepe
 rebuild all packages, test installation in disposable systems, and then generate and sign:
 
 ```sh
-python3 scripts/update-metadata.py --tag v2.2.0 --signing-key "$HOME/.local/share/clipvault-signing/release.pem"
+python3 scripts/update-metadata.py --tag v2.2.1 --signing-key "$HOME/.local/share/clipvault-signing/release.pem"
 ```
 
 This command refuses a key inside the repository, a non-Ed25519 key or a key whose public

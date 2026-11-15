@@ -22,7 +22,7 @@ override_dh_auto_build:
 
 override_dh_auto_test:
 	$(CARGO) test --locked --offline
-	test "$$(target/release/clipvault --version)" = 'ClipVault 2.1.0'
+	test "$$(target/release/clipvault --version)" = "ClipVault $$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
 	desktop-file-validate packaging/linux/io.clipvault.desktop.desktop
 
 override_dh_auto_install:

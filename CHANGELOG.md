@@ -1,4 +1,16 @@
-# 2.2.0 — 2026-11-13
+# Changelog
+
+## 2.2.1 — 2026-11-15
+
+ClipVault 2.2.1
+• Automated releases validate the exact tagged source, build and check DEB/AppImage on Ubuntu 24.04 and RPM on Fedora 44, and sign update metadata with Ed25519.
+• Publication verifies the complete bundle and uploaded bytes before making a release public; retries never replace published files. Manual runs default to a nonpublishing rehearsal.
+• Redesigned responsive website uses compiled Tailwind, real app imagery, Light/Dark/System themes, keyboard-accessible controls, and actual latest stable release assets with safe GitHub Releases fallbacks.
+• Updated documentation covers installation, compatibility, privacy, signing setup, release retries, website deployment, and screenshot provenance.
+• Signing requires a maintainer-provisioned external private key in GitHub Actions secrets and its trusted public key in the app. The trust store remains empty; automatic installation stays disabled until setup and signed publication are complete.
+Existing history, pins, preferences, shortcuts and data-directory arguments are preserved. No schema reset or data deletion is needed.
+
+## 2.2.0 — 2026-11-13
 
 ClipVault 2.2.0
 • History toolbar separates clip count and Clear unpinned, with hidden-filter scope in tooltip and confirmation.
@@ -8,8 +20,6 @@ ClipVault 2.2.0
 • Signed Ed25519 release metadata, SHA-256 artifact checks, system authorization, atomic AppImage replacement with rollback, cancellation and safe restart coordination.
 • Automatic installation requires maintainer-provisioned signing keys and published signed metadata. Unsupported installations use manual downloads.
 Existing history, pins, preferences, shortcuts and data-directory arguments are preserved. No schema reset or data deletion is needed.
-
-# Changelog
 
 ## 2.1.0 — 2026-11-12
 

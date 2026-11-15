@@ -1,6 +1,6 @@
 # Automated releases
 
-The repository root is `app/` in the Craft Anything workspace. `.github/workflows/packages.yml` is the only package publisher. Pushing `v*` tags starts it; manual dispatch requires an existing tag and defaults to **publish=false**. No releases were created or changed while developing this workflow. Application version remains 2.2.0.
+The repository root is `app/` in the Craft Anything workspace. `.github/workflows/packages.yml` is the only package publisher. Pushing `v*` tags starts it; manual dispatch requires an existing tag and defaults to **publish=false**. No releases were created or changed while developing this workflow. Application source version is 2.2.1; this preparation has not created or pushed a release tag.
 
 ## One-time setup
 
@@ -18,15 +18,15 @@ The repository root is `app/` in the Craft Anything workspace. `.github/workflow
 
 `Cargo.lock` and `package-lock.json` lock dependencies. Ubuntu Rust is 1.89.0, cargo-deb is 3.8.0. `packaging/tools.lock.json` pins both AppImage helper SHA-256 values. Their upstream continuous URLs can move: a reviewed cached copy is reused, but a changed download fails closed. To refresh, verify the upstream build/source and licensing, review its digest, update the lock, and rehearse packaging before tagging. Do not accept a changed digest automatically. Fedora/system packages are distribution-managed, so builds are not promised to be bit-for-bit reproducible; published-byte comparison protects retries.
 
-## Prepare a version — example 2.2.1
+## Prepare a version — current source 2.2.1
 
-The following is a clearly labeled **example**, not an instruction to bump the current task’s source automatically.
+The source is prepared for 2.2.1 dated 2026-11-15. The checklist below documents the required edits for this and future versions; it does not authorize tagging or publication. See [local verification](../V2.2.1-VERIFICATION.md) for checks and limits.
 
 1. Change `[package].version` in `Cargo.toml` to `2.2.1`.
 2. Run `cargo check --offline` (or `cargo check` after fetching missing crates), which updates the root `clipvault` entry in `Cargo.lock`. Review the lock diff; unrelated dependency upgrades are unnecessary.
 3. Add a first `<release version="2.2.1" date="YYYY-MM-DD">…</release>` entry to `packaging/linux/io.clipvault.desktop.metainfo.xml`. Use the real release date.
 4. Add a nonempty `## 2.2.1 — YYYY-MM-DD` section to `CHANGELOG.md`. This section supplies both release notes and the signed manifest’s `release_notes`. Historical `CHANGELOG-v*.txt` and verification reports stay intact.
-5. The app’s What’s New currently embeds `CHANGELOG-v2.2.0.txt` in `src/ui.rs`. For a release, add `CHANGELOG-v2.2.1.txt`, update that include, and update the current-version document list in `Cargo.toml` / `scripts/packaging-support.py` if shipping it. Historical documents remain valid; do not overwrite them. Review user-facing source-version references in README/compatibility records when releasing.
+5. The app’s What’s New embeds `CHANGELOG-v2.2.1.txt` in `src/ui.rs`. Keep that include and the current-version document lists in `Cargo.toml` / `scripts/packaging-support.py` synchronized with each release, including its verification report. Keep `debian/changelog` and the package document checks current; `debian/rules` reads the expected version from Cargo.toml. Historical documents remain valid; do not overwrite them. Review user-facing source-version references in README/compatibility records when releasing.
 6. Check everything locally:
 
    ```sh
@@ -42,11 +42,11 @@ The following is a clearly labeled **example**, not an instruction to bump the c
    npm run test:browser
    ```
 
-Commit all intended release changes, review them, then push and tag:
+Only after maintainer setup, successful checks, review, and explicit authorization to publish, commit all intended release changes, then push and tag. These commands have not been run for 2.2.1:
 
 ```sh
 git status --short
-git add Cargo.toml Cargo.lock CHANGELOG.md CHANGELOG-v2.2.1.txt src/ui.rs packaging/linux/io.clipvault.desktop.metainfo.xml README.md scripts/packaging-support.py
+git add Cargo.toml Cargo.lock CHANGELOG.md CHANGELOG-v2.2.1.txt RELEASE-NOTES.md V2.2.1-VERIFICATION.md src/ui.rs packaging/linux/io.clipvault.desktop.metainfo.xml README.md COMPATIBILITY.md scripts/packaging-support.py scripts/test-linux-packages.sh debian/changelog debian/rules packaging/RELEASING.md packaging/README.md packaging/UPDATER.md packaging/VALIDATION.md
 git commit -m "Prepare ClipVault 2.2.1"
 git push origin main
 git tag -a v2.2.1 -m "ClipVault 2.2.1"
@@ -66,7 +66,7 @@ Do not move an existing release tag. If any required change is missed, prepare a
 | Publish | Revalidates bundle and exact commit; creates a draft, uploads and reads back every file, and publishes only after all bytes match |
 | Pages | The existing website workflow builds static Tailwind output and deploys it from the default branch after a successful package workflow; browsers fetch/cache actual latest stable release data |
 
-Release files for the example:
+Expected release files for 2.2.1:
 
 ```text
 clipvault_2.2.1-1_amd64.deb

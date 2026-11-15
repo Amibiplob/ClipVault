@@ -1,12 +1,11 @@
-# ClipVault 2.2.0
+# ClipVault 2.2.1
 
-ClipVault 2.2.0
-• History toolbar separates clip count and Clear unpinned, with hidden-filter scope in tooltip and confirmation.
-• Larger image previews preserve aspect ratio, with copied time, dimensions for new images, lazy visible rows and a bounded thumbnail cache.
-• Centered Back icon/label and compact wrapping About links.
-• Integrated Linux updater detects running package ownership or AppImage runtime and matches package, CPU and supported distribution release.
-• Signed Ed25519 release metadata, SHA-256 artifact checks, system authorization, atomic AppImage replacement with rollback, cancellation and safe restart coordination.
-• Automatic installation requires maintainer-provisioned signing keys and published signed metadata. Unsupported installations use manual downloads.
+ClipVault 2.2.1
+• Automated releases validate the exact tagged source, build and check DEB/AppImage on Ubuntu 24.04 and RPM on Fedora 44, and sign update metadata with Ed25519.
+• Publication verifies the complete bundle and uploaded bytes before making a release public; retries never replace published files. Manual runs default to a nonpublishing rehearsal.
+• Redesigned responsive website uses compiled Tailwind, real app imagery, Light/Dark/System themes, keyboard-accessible controls, and actual latest stable release assets with safe GitHub Releases fallbacks.
+• Updated documentation covers installation, compatibility, privacy, signing setup, release retries, website deployment, and screenshot provenance.
+• Signing requires a maintainer-provisioned external private key in GitHub Actions secrets and its trusted public key in the app. The trust store remains empty; automatic installation stays disabled until setup and signed publication are complete.
 Existing history, pins, preferences, shortcuts and data-directory arguments are preserved. No schema reset or data deletion is needed.
 
-See [update signing and publication](packaging/UPDATER.md) and [verification](V2.2.0-VERIFICATION.md). Artifacts are local candidates until independently tested, signed and published.
+See [release automation and setup](packaging/RELEASING.md), [updater trust](packaging/UPDATER.md), [website documentation](docs/WEBSITE.md), and [local verification](V2.2.1-VERIFICATION.md). This source preparation does not publish a release or establish live Actions/Pages or installed-upgrade acceptance. No release tag has been created.
